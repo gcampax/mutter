@@ -29,6 +29,12 @@
 #include <clutter/clutter.h>
 #include <X11/Xlib.h>
 
+#ifdef HAVE_WAYLAND
+#include <wayland-server.h>
+#include "meta-wayland-private.h"
+#include <clutter/wayland/clutter-wayland-surface.h>
+#endif
+
 G_BEGIN_DECLS
 
 #define META_TYPE_SHAPED_TEXTURE            (meta_shaped_texture_get_type())
@@ -45,7 +51,11 @@ typedef struct _MetaShapedTexturePrivate MetaShapedTexturePrivate;
 struct _MetaShapedTextureClass
 {
   /*< private >*/
+#ifdef HAVE_WAYLAND
+  ClutterWaylandSurfaceClass parent_class;
+#else
   ClutterActorClass parent_class;
+#endif
 };
 
 /**
@@ -64,7 +74,13 @@ struct _MetaShapedTexture
 
 GType meta_shaped_texture_get_type (void) G_GNUC_CONST;
 
-ClutterActor *meta_shaped_texture_new (void);
+ClutterActor *meta_shaped_texture_new_with_xwindow (Window xwindow);
+#ifdef HAVE_WAYLAND
+ClutterActor *meta_shaped_texture_new_with_wayland_surface  (MetaWaylandSurface *surface);
+void meta_shaped_texture_set_wayland_surface                (MetaShapedTexture  *stex,
+                                                             MetaWaylandSurface *surface);
+MetaWaylandSurface *meta_shaped_texture_get_wayland_surface (MetaShapedTexture *stex);
+#endif
 
 void meta_shaped_texture_set_create_mipmaps (MetaShapedTexture *stex,
 					     gboolean           create_mipmaps);
@@ -77,6 +93,10 @@ void meta_shaped_texture_update_area (MetaShapedTexture *stex,
 
 void meta_shaped_texture_set_pixmap (MetaShapedTexture *stex,
                                      Pixmap             pixmap);
+#ifdef HAVE_WAYLAND
+void meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture *stex,
+                                                struct wl_buffer  *buffer);
+#endif
 
 CoglTexture * meta_shaped_texture_get_texture (MetaShapedTexture *stex);
 

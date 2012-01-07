@@ -317,6 +317,9 @@ meta_plugin_manager_xevent_filter (MetaPluginManager *plugin_mgr,
    */
   if (klass->xevent_filter)
     return klass->xevent_filter (plugin, xev);
+
+  if (meta_is_display_server ())
+    return FALSE;
   else
     return clutter_x11_handle_event (xev) != CLUTTER_X11_FILTER_CONTINUE;
 }

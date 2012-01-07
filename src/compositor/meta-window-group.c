@@ -13,6 +13,7 @@
 #include "meta-window-group.h"
 #include "meta-background-actor-private.h"
 #include "meta-background-group-private.h"
+#include "window-private.h"
 
 struct _MetaWindowGroupClass
 {
@@ -98,7 +99,9 @@ meta_window_group_paint (ClutterActor *actor)
   int paint_x_offset, paint_y_offset;
 
   MetaWindowGroup *window_group = META_WINDOW_GROUP (actor);
+#ifndef HAVE_WAYLAND
   MetaCompScreen *info = meta_screen_get_compositor_data (window_group->screen);
+#endif
 
   /* Normally we expect an actor to be drawn at it's position on the screen.
    * However, if we're inside the paint of a ClutterClone, that won't be the
@@ -142,6 +145,7 @@ meta_window_group_paint (ClutterActor *actor)
 
   visible_region = cairo_region_create_rectangle (&visible_rect);
 
+#ifndef HAVE_WAYLAND
   if (info->unredirected_window != NULL)
     {
       cairo_rectangle_int_t unredirected_rect;
@@ -150,14 +154,17 @@ meta_window_group_paint (ClutterActor *actor)
       meta_window_get_outer_rect (window, (MetaRectangle *)&unredirected_rect);
       cairo_region_subtract_rectangle (visible_region, &unredirected_rect);
     }
+#endif
 
   for (l = children; l; l = l->next)
     {
       if (!CLUTTER_ACTOR_IS_VISIBLE (l->data))
         continue;
 
+#ifndef HAVE_WAYLAND
       if (l->data == info->unredirected_window)
         continue;
+#endif
 
       /* If an actor has effects applied, then that can change the area
        * it paints and the opacity, so we no longer can figure out what
@@ -180,6 +187,7 @@ meta_window_group_paint (ClutterActor *actor)
 
       if (META_IS_WINDOW_ACTOR (l->data))
         {
+          MetaWindow *meta_window;
           MetaWindowActor *window_actor = l->data;
           int x, y;
 
@@ -194,7 +202,13 @@ meta_window_group_paint (ClutterActor *actor)
 
           meta_window_actor_set_visible_region (window_actor, visible_region);
 
-          if (clutter_actor_get_paint_opacity (CLUTTER_ACTOR (window_actor)) == 0xff)
+          /* Currently wayland clients have no way to report opaque
+           * window regions so for now we assume that all wayland
+           * clients are transparent... */
+          meta_window = meta_window_actor_get_meta_window (window_actor);
+
+          if (meta_window->client_type != META_WINDOW_CLIENT_TYPE_WAYLAND &&
+              clutter_actor_get_paint_opacity (CLUTTER_ACTOR (window_actor)) == 0xff)
             {
               cairo_region_t *obscured_region = meta_window_actor_get_obscured_region (window_actor);
               if (obscured_region)
