@@ -931,8 +931,24 @@ meta_display_open (void)
   while (tmp != NULL)
     {
       MetaScreen *screen = tmp->data;
-	
-      meta_screen_manage_all_windows (screen);
+
+      if (meta_is_display_server ())
+        {
+          /* Instead of explicitly enumerating all windows during
+           * initialization, when we run as a wayland compositor we can rely on
+           * xwayland notifying us of all top level windows so we create
+           * MetaWindows when we get those notifications.
+           *
+           * We still want a guard window so we can avoid
+           * unmapping/withdrawing minimized windows for live
+           * thumbnails...
+           */
+          if (screen->guard_window == None)
+            screen->guard_window =
+              meta_screen_create_guard_window (screen->display->xdisplay, screen);
+        }
+      else
+        meta_screen_manage_all_windows (screen);
 
       tmp = tmp->next;
     }
@@ -2284,8 +2300,8 @@ event_callback (XEvent   *event,
                 }
 
               if (display->compositor)
-                meta_compositor_window_shape_changed (display->compositor,
-                                                      window);
+                meta_compositor_window_x11_shape_changed (display->compositor,
+                                                          window);
             }
           else if (sev->kind == ShapeInput)
             {
@@ -2311,8 +2327,8 @@ event_callback (XEvent   *event,
                 }
 
               if (display->compositor)
-                meta_compositor_window_shape_changed (display->compositor,
-                                                      window);
+                meta_compositor_window_x11_shape_changed (display->compositor,
+                                                          window);
             }
         }
       else
@@ -3871,6 +3887,11 @@ void
 meta_display_unregister_x_window (MetaDisplay *display,
                                   Window       xwindow)
 {
+#ifdef HAVE_WAYLAND
+  if (xwindow == None)
+    return;
+#endif
+
   g_return_if_fail (g_hash_table_lookup (display->xids, &xwindow) != NULL);
 
   g_hash_table_remove (display->xids, &xwindow);
