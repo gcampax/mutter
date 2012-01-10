@@ -134,6 +134,11 @@ AC_ARG_WITH([wayland-protocols],
             ],
             [])
 
+AC_ARG_WITH([xwayland-path],
+            [AS_HELP_STRING([--with-xwayland-path], [Absolute path for an X Wayland server])],
+            [XWAYLAND_PATH="$withval"],
+            [XWAYLAND_PATH="$bindir/Xorg"])
+
 AM_GLIB_GNU_GETTEXT
 
 ## here we get the flags we'll actually use
@@ -254,6 +259,7 @@ fi
 if test x$have_wayland = "xyes"; then
   MUTTER_PC_MODULES="$MUTTER_PC_MODULES wayland-server clutter-wayland-compositor-1.0"
   AC_DEFINE(HAVE_WAYLAND, , [Building with Wayland support])
+  AC_SUBST(XWAYLAND_PATH)
 fi
 
 AM_CONDITIONAL(HAVE_WAYLAND, test x$have_wayland = "xyes")
