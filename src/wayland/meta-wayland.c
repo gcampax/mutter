@@ -43,6 +43,7 @@
 #include "xserver-server-protocol.h"
 
 #include "meta-wayland-private.h"
+#include "meta-wayland-stage.h"
 #include "meta-window-actor-private.h"
 #include "meta-wayland-seat.h"
 #include "meta-wayland-keyboard.h"
@@ -325,6 +326,8 @@ meta_wayland_surface_commit (struct wl_client *client,
                   (buffer->width != rect.width || buffer->height != rect.height))
                 meta_window_resize (surface->window, FALSE, buffer->width, buffer->height);
             }
+          else if (surface == compositor->seat->sprite)
+            meta_wayland_seat_update_sprite (compositor->seat);
 
           wl_signal_add (&surface->buffer->resource.destroy_signal,
                          &surface->buffer_destroy_listener);
@@ -1312,6 +1315,13 @@ event_cb (ClutterActor *stage,
         }
     }
 
+  meta_wayland_stage_set_cursor_position (META_WAYLAND_STAGE (stage),
+                                          wl_fixed_to_int (pointer->x),
+                                          wl_fixed_to_int (pointer->y));
+
+  if (pointer->current == NULL)
+    meta_wayland_stage_set_default_cursor (META_WAYLAND_STAGE (stage));
+
   display = meta_get_display ();
   if (!display)
     return FALSE;
@@ -1507,7 +1517,7 @@ meta_wayland_init (void)
   if (clutter_init (NULL, NULL) != CLUTTER_INIT_SUCCESS)
     g_error ("Failed to initialize Clutter");
 
-  compositor->stage = clutter_stage_new ();
+  compositor->stage = meta_wayland_stage_new ();
   clutter_stage_set_user_resizable (CLUTTER_STAGE (compositor->stage), FALSE);
   g_signal_connect_after (compositor->stage, "paint",
                           G_CALLBACK (paint_finished_cb), compositor);
