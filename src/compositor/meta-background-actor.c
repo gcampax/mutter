@@ -31,8 +31,6 @@
 #define CLUTTER_ENABLE_EXPERIMENTAL_API
 #include <clutter/clutter.h>
 
-#include <X11/Xatom.h>
-
 #include "cogl-utils.h"
 #include "compositor-private.h"
 #include <meta/errors.h>
@@ -53,11 +51,14 @@ struct _MetaScreenBackground
   MetaScreen *screen;
   GSList *actors;
 
+  GSettings *settings;
+  GnomeBG *bg;
+  GCancellable *cancellable;
+
   float texture_width;
   float texture_height;
   CoglTexture *texture;
   CoglMaterialWrapMode wrap_mode;
-  guint have_pixmap : 1;
 };
 
 struct _MetaBackgroundActorPrivate
@@ -84,30 +85,26 @@ G_DEFINE_TYPE (MetaBackgroundActor, meta_background_actor, CLUTTER_TYPE_ACTOR);
 
 static void set_texture                (MetaScreenBackground *background,
                                         CoglHandle            texture);
-static void set_texture_to_stage_color (MetaScreenBackground *background);
-
-static void
-on_notify_stage_color (GObject              *stage,
-                       GParamSpec           *pspec,
-                       MetaScreenBackground *background)
-{
-  if (!background->have_pixmap)
-    set_texture_to_stage_color (background);
-}
 
 static void
 free_screen_background (MetaScreenBackground *background)
 {
   set_texture (background, COGL_INVALID_HANDLE);
 
-  if (background->screen != NULL)
-    {
-      ClutterActor *stage = meta_get_stage_for_screen (background->screen);
-      g_signal_handlers_disconnect_by_func (stage,
-                                            (gpointer) on_notify_stage_color,
-                                            background);
-      background->screen = NULL;
-    }
+  g_cancellable_cancel (background->cancellable);
+  g_object_unref (background->cancellable);
+
+  g_object_unref (background->bg);
+  g_object_unref (background->settings);
+}
+
+static void
+on_settings_changed (GSettings            *settings,
+                     const char           *key,
+                     MetaScreenBackground *background)
+{
+  gnome_bg_load_from_preferences (background->bg,
+                                  background->settings);
 }
 
 static MetaScreenBackground *
@@ -118,19 +115,25 @@ meta_screen_background_get (MetaScreen *screen)
   background = g_object_get_data (G_OBJECT (screen), "meta-screen-background");
   if (background == NULL)
     {
-      ClutterActor *stage;
-
       background = g_new0 (MetaScreenBackground, 1);
 
       background->screen = screen;
       g_object_set_data_full (G_OBJECT (screen), "meta-screen-background",
                               background, (GDestroyNotify) free_screen_background);
 
-      stage = meta_get_stage_for_screen (screen);
-      g_signal_connect (stage, "notify::color",
-                        G_CALLBACK (on_notify_stage_color), background);
+      background->settings = g_settings_new ("org.gnome.desktop.background");
+      g_signal_connect (background->settings, "changed",
+                        G_CALLBACK (on_settings_changed), background);
 
-      meta_background_actor_update (screen);
+      background->bg = gnome_bg_new ();
+      g_signal_connect_object (background->bg, "transitioned",
+                               G_CALLBACK (meta_background_actor_update),
+                               screen, G_CONNECT_SWAPPED);
+      g_signal_connect_object (background->bg, "changed",
+                               G_CALLBACK (meta_background_actor_update),
+                               screen, G_CONNECT_SWAPPED);
+
+      on_settings_changed (background->settings, NULL, background);
     }
 
   return background;
@@ -209,32 +212,6 @@ set_texture (MetaScreenBackground *background,
     set_texture_on_actor (l->data);
 
   update_wrap_mode (background);
-}
-
-/* Sets our pipeline to paint with a 1x1 texture of the stage's background
- * color; doing this when we have no pixmap allows the application to turn
- * off painting the stage. There might be a performance benefit to
- * painting in this case with a solid color, but the normal solid color
- * case is a 1x1 root pixmap, so we'd have to reverse-engineer that to
- * actually pick up the (small?) performance win. This is just a fallback.
- */
-static void
-set_texture_to_stage_color (MetaScreenBackground *background)
-{
-  ClutterActor *stage = meta_get_stage_for_screen (background->screen);
-  ClutterColor color;
-  CoglHandle texture;
-
-  clutter_stage_get_color (CLUTTER_STAGE (stage), &color);
-
-  /* Slicing will prevent COGL from using hardware texturing for
-   * the tiled 1x1 pixmap, and will cause it to draw the window
-   * background in millions of separate 1x1 rectangles */
-  texture = meta_create_color_texture_4ub (color.red, color.green,
-                                           color.blue, 0xff,
-                                           COGL_TEXTURE_NO_SLICING);
-  set_texture (background, texture);
-  cogl_handle_unref (texture);
 }
 
 static void
@@ -489,82 +466,68 @@ meta_background_actor_new_for_screen (MetaScreen *screen)
   return CLUTTER_ACTOR (self);
 }
 
+static void
+on_background_drawn (GObject      *object,
+                     GAsyncResult *result,
+                     gpointer      user_data)
+{
+  MetaScreen *screen = META_SCREEN (object);
+  MetaScreenBackground *background;
+  CoglHandle texture;
+  GError *error;
+
+  background = meta_screen_background_get (screen);
+
+  error = NULL;
+  texture = meta_background_draw_finish (screen, result, &error);
+
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+      g_error_free (error);
+      return;
+    }
+
+  if (texture != COGL_INVALID_HANDLE)
+    {
+      set_texture (background, texture);
+      cogl_handle_unref (texture);
+      return;
+    }
+  else
+    {
+      g_warning ("Failed to create background texture from pixmap: %s",
+                 error->message);
+      g_error_free (error);
+    }
+}
+
 /**
  * meta_background_actor_update:
  * @screen: a #MetaScreen
  *
- * Refetches the _XROOTPMAP_ID property for the root window and updates
- * the contents of the background actor based on that. There's no attempt
- * to optimize out pixmap values that don't change (since a root pixmap
- * could be replaced by with another pixmap with the same ID under some
- * circumstances), so this should only be called when we actually receive
- * a PropertyNotify event for the property.
+ * Forces a redraw of the background. The redraw happens asynchronously in
+ * a thread, and the actual on screen change is therefore delayed until
+ * the redraw is finished.
  */
 void
 meta_background_actor_update (MetaScreen *screen)
 {
   MetaScreenBackground *background;
-  MetaDisplay *display;
-  MetaCompositor *compositor;
-  Atom type;
-  int format;
-  gulong nitems;
-  gulong bytes_after;
-  guchar *data;
-  Pixmap root_pixmap_id;
 
   background = meta_screen_background_get (screen);
-  display = meta_screen_get_display (screen);
-  compositor = meta_display_get_compositor (display);
 
-  root_pixmap_id = None;
-  if (!XGetWindowProperty (meta_display_get_xdisplay (display),
-                           meta_screen_get_xroot (screen),
-                           compositor->atom_x_root_pixmap,
-                           0, LONG_MAX,
-                           False,
-                           AnyPropertyType,
-                           &type, &format, &nitems, &bytes_after, &data) &&
-      type != None)
-  {
-     /* Got a property. */
-     if (type == XA_PIXMAP && format == 32 && nitems == 1)
-       {
-         /* Was what we expected. */
-         root_pixmap_id = *(Pixmap *)data;
-       }
-
-     XFree(data);
-  }
-
-  if (root_pixmap_id != None)
+  if (background->cancellable)
     {
-      CoglHandle texture;
-      CoglContext *ctx = clutter_backend_get_cogl_context (clutter_get_default_backend ());
-      GError *error = NULL;
-
-      meta_error_trap_push (display);
-      texture = cogl_texture_pixmap_x11_new (ctx, root_pixmap_id, FALSE, &error);
-      meta_error_trap_pop (display);
-
-      if (texture != COGL_INVALID_HANDLE)
-        {
-          set_texture (background, texture);
-          cogl_handle_unref (texture);
-
-          background->have_pixmap = True;
-          return;
-        }
-      else
-        {
-          g_warning ("Failed to create background texture from pixmap: %s",
-                     error->message);
-          g_error_free (error);
-        }
+      g_cancellable_cancel (background->cancellable);
+      g_object_unref (background->cancellable);
     }
 
-  background->have_pixmap = False;
-  set_texture_to_stage_color (background);
+  background->cancellable = g_cancellable_new ();
+
+  meta_background_draw_async (screen,
+                              background->bg,
+                              background->cancellable,
+                              on_background_drawn, NULL);
 }
 
 /**
