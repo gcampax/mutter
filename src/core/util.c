@@ -55,6 +55,7 @@ static gint verbose_topics = 0;
 static gboolean is_debugging = FALSE;
 static gboolean replace_current = FALSE;
 static int no_prefix = 0;
+static gboolean is_display_server = FALSE;
 
 #ifdef WITH_VERBOSE_MODE
 static FILE* logfile = NULL;
@@ -192,6 +193,18 @@ void
 meta_set_replace_current_wm (gboolean setting)
 {
   replace_current = setting;
+}
+
+gboolean
+meta_is_display_server (void)
+{
+  return is_display_server;
+}
+
+void
+meta_set_is_display_server (gboolean value)
+{
+  is_display_server = value;
 }
 
 char *
