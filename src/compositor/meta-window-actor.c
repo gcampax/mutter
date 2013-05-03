@@ -384,6 +384,9 @@ meta_window_actor_constructed (GObject *object)
 
       clutter_actor_add_child (CLUTTER_ACTOR (self), priv->actor);
 
+      if (meta_is_display_server ())
+        clutter_actor_set_reactive (priv->actor, TRUE);
+
       /*
        * Since we are holding a pointer to this actor independently of the
        * ClutterContainer internals, and provide a public API to access it,
@@ -2766,3 +2769,11 @@ meta_window_actor_set_updates_frozen (MetaWindowActor *self,
         }
     }
 }
+
+#ifdef HAVE_WAYLAND
+ClutterActor *
+meta_window_actor_get_shaped_texture (MetaWindowActor *self)
+{
+  return self->priv->actor;
+}
+#endif
