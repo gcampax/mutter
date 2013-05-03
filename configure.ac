@@ -139,6 +139,8 @@ AC_ARG_WITH([xwayland-path],
             [XWAYLAND_PATH="$withval"],
             [XWAYLAND_PATH="$bindir/Xorg"])
 
+AC_CHECK_FUNCS([mkostemp])
+
 AM_GLIB_GNU_GETTEXT
 
 ## here we get the flags we'll actually use

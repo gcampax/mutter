@@ -83,4 +83,8 @@ void meta_window_actor_reset_visible_regions      (MetaWindowActor *self);
 void meta_window_actor_effect_completed (MetaWindowActor *actor,
                                          gulong           event);
 
+#ifdef HAVE_WAYLAND
+ClutterActor *meta_window_actor_get_shaped_texture (MetaWindowActor *self);
+#endif
+
 #endif /* META_WINDOW_ACTOR_PRIVATE_H */

@@ -44,6 +44,9 @@
 
 #include "meta-wayland-private.h"
 #include "meta-window-actor-private.h"
+#include "meta-wayland-seat.h"
+#include "meta-wayland-keyboard.h"
+#include "meta-wayland-data-device.h"
 #include "display-private.h"
 #include "window-private.h"
 #include <meta/types.h>
@@ -407,12 +410,31 @@ const struct wl_surface_interface meta_wayland_surface_interface = {
   meta_wayland_surface_set_buffer_transform
 };
 
+void
+meta_wayland_compositor_set_input_focus (MetaWaylandCompositor *compositor,
+                                         MetaWindow            *window)
+{
+  MetaWaylandSurface *surface = window ? window->surface : NULL;
+
+  meta_wayland_keyboard_set_focus (&compositor->seat->keyboard,
+                                   surface);
+  meta_wayland_data_device_set_keyboard_focus (compositor->seat);
+}
+
 static void
 window_destroyed_cb (void *user_data, GObject *old_object)
 {
   MetaWaylandSurface *surface = user_data;
 
   surface->window = NULL;
+}
+
+void
+meta_wayland_compositor_repick (MetaWaylandCompositor *compositor)
+{
+  meta_wayland_seat_repick (compositor->seat,
+                            get_time (),
+                            NULL);
 }
 
 static void
@@ -450,6 +472,11 @@ meta_wayland_surface_free (MetaWaylandSurface *surface)
     wl_resource_destroy (cb->resource);
 
   g_slice_free (MetaWaylandSurface, surface);
+
+  meta_wayland_compositor_repick (compositor);
+
+ if (compositor->implicit_grab_surface == surface)
+   compositor->implicit_grab_surface = compositor->seat->pointer.current;
 }
 
 static void
@@ -1234,6 +1261,14 @@ xserver_set_window_id (struct wl_client *client,
       g_object_weak_ref (G_OBJECT (surface->window),
                          window_destroyed_cb,
                          surface);
+
+      /* If the window is already meant to have focus then the
+       * original attempt to call this in response to the FocusIn
+       * event will have been lost because there was no surface
+       * yet. */
+      if (window->has_focus)
+        meta_wayland_compositor_set_input_focus (compositor, window);
+
     }
 #warning "FIXME: Handle surface destroy and remove window_surfaces mapping"
 }
@@ -1295,10 +1330,192 @@ stage_destroy_cb (void)
   meta_quit (META_EXIT_SUCCESS);
 }
 
+static gboolean
+event_cb (ClutterActor *stage,
+          const ClutterEvent *event,
+          MetaWaylandCompositor *compositor)
+{
+  MetaWaylandSeat *seat = compositor->seat;
+  MetaWaylandPointer *pointer = &seat->pointer;
+  MetaWaylandSurface *surface;
+  MetaDisplay *display;
+  XMotionEvent xevent;
+
+  meta_wayland_seat_handle_event (compositor->seat, event);
+
+  /* HACK: for now, the surfaces from Wayland clients aren't
+     integrated into Mutter's stacking and Mutter won't give them
+     focus on mouse clicks. As a hack to work around this we can just
+     give them input focus on mouse clicks so we can at least test the
+     keyboard support */
+  if (event->type == CLUTTER_BUTTON_PRESS)
+    {
+      surface = pointer->current;
+
+      /* Only focus surfaces that wouldn't be handled by the
+         corresponding X events */
+      if (surface && surface->xid == 0)
+        {
+          meta_wayland_keyboard_set_focus (&seat->keyboard, surface);
+          meta_wayland_data_device_set_keyboard_focus (seat);
+        }
+    }
+
+  display = meta_get_display ();
+  if (!display)
+    return FALSE;
+
+  /* We want to synthesize X events for mouse motion events so that we
+     don't have to rely on the X server's window position being
+     synched with the surface positoin. See the comment in
+     event_callback() in display.c */
+
+  switch (event->type)
+    {
+    case CLUTTER_BUTTON_PRESS:
+      if (compositor->implicit_grab_surface == NULL)
+        {
+          compositor->implicit_grab_button = event->button.button;
+          compositor->implicit_grab_surface = pointer->current;
+        }
+      return FALSE;
+
+    case CLUTTER_BUTTON_RELEASE:
+      if (event->type == CLUTTER_BUTTON_RELEASE &&
+          compositor->implicit_grab_surface &&
+          event->button.button == compositor->implicit_grab_button)
+        compositor->implicit_grab_surface = NULL;
+      return FALSE;
+
+    case CLUTTER_MOTION:
+      break;
+
+    default:
+      return FALSE;
+    }
+
+  xevent.type = MotionNotify;
+  xevent.is_hint = NotifyNormal;
+  xevent.same_screen = TRUE;
+  xevent.serial = 0;
+  xevent.send_event = False;
+  xevent.display = display->xdisplay;
+  xevent.root = DefaultRootWindow (display->xdisplay);
+
+  if (compositor->implicit_grab_surface)
+    surface = compositor->implicit_grab_surface;
+  else
+    surface = pointer->current;
+
+  if (surface == pointer->current)
+    {
+      xevent.x = wl_fixed_to_int (pointer->current_x);
+      xevent.y = wl_fixed_to_int (pointer->current_y);
+    }
+  else if (surface && surface->window)
+    {
+      ClutterActor *window_actor =
+        CLUTTER_ACTOR (meta_window_get_compositor_private (surface->window));
+      float ax, ay;
+
+      if (window_actor)
+        {
+          clutter_actor_transform_stage_point (window_actor,
+                                               wl_fixed_to_double (pointer->x),
+                                               wl_fixed_to_double (pointer->y),
+                                               &ax, &ay);
+
+          xevent.x = ax;
+          xevent.y = ay;
+        }
+      else
+        {
+          xevent.x = wl_fixed_to_int (pointer->x);
+          xevent.y = wl_fixed_to_int (pointer->y);
+        }
+    }
+  else
+    {
+      xevent.x = wl_fixed_to_int (pointer->x);
+      xevent.y = wl_fixed_to_int (pointer->y);
+    }
+
+  if (surface && surface->xid != None)
+    xevent.window = surface->xid;
+  else
+    xevent.window = xevent.root;
+
+  /* Mutter doesn't really know about the sub-windows. This assumes it
+     doesn't care either */
+  xevent.subwindow = xevent.window;
+  xevent.time = event->any.time;
+  xevent.x_root = wl_fixed_to_int (pointer->x);
+  xevent.y_root = wl_fixed_to_int (pointer->y);
+  /* The Clutter state flags exactly match the X values */
+  xevent.state = clutter_event_get_state (event);
+
+  meta_display_handle_event (display, (XEvent *) &xevent);
+
+  return FALSE;
+}
+
+static gboolean
+event_emission_hook_cb (GSignalInvocationHint *ihint,
+                        guint n_param_values,
+                        const GValue *param_values,
+                        gpointer data)
+{
+  MetaWaylandCompositor *compositor = data;
+  ClutterActor *actor;
+  ClutterEvent *event;
+
+  g_return_val_if_fail (n_param_values == 2, FALSE);
+
+  actor = g_value_get_object (param_values + 0);
+  event = g_value_get_boxed (param_values + 1);
+
+  if (actor == NULL)
+    return TRUE /* stay connected */;
+
+  /* If this event belongs to the corresponding grab for this event
+   * type then the captured-event signal won't be emitted so we have
+   * to manually forward it on */
+
+  switch (event->type)
+    {
+      /* Pointer events */
+    case CLUTTER_MOTION:
+    case CLUTTER_ENTER:
+    case CLUTTER_LEAVE:
+    case CLUTTER_BUTTON_PRESS:
+    case CLUTTER_BUTTON_RELEASE:
+    case CLUTTER_SCROLL:
+      if (actor == clutter_get_pointer_grab ())
+        event_cb (clutter_actor_get_stage (actor),
+                  event,
+                  compositor);
+      break;
+
+      /* Keyboard events */
+    case CLUTTER_KEY_PRESS:
+    case CLUTTER_KEY_RELEASE:
+      if (actor == clutter_get_keyboard_grab ())
+        event_cb (clutter_actor_get_stage (actor),
+                  event,
+                  compositor);
+
+    default:
+      break;
+    }
+
+  return TRUE /* stay connected */;
+}
+
 void
 meta_wayland_init (void)
 {
   MetaWaylandCompositor *compositor = &_meta_wayland_compositor;
+  guint event_signal;
 
   memset (compositor, 0, sizeof (MetaWaylandCompositor));
 
@@ -1345,6 +1562,25 @@ meta_wayland_init (void)
                           G_CALLBACK (paint_finished_cb), compositor);
   g_signal_connect (compositor->stage, "destroy",
                     G_CALLBACK (stage_destroy_cb), NULL);
+
+  meta_wayland_data_device_manager_init (compositor->wayland_display);
+
+  compositor->seat = meta_wayland_seat_new (compositor->wayland_display);
+
+  g_signal_connect (compositor->stage,
+                    "captured-event",
+                    G_CALLBACK (event_cb),
+                    compositor);
+  /* If something sets a grab on an actor then the captured event
+   * signal won't get emitted but we still want to see these events so
+   * we can update the cursor position. To make sure we see all events
+   * we also install an emission hook on the event signal */
+  event_signal = g_signal_lookup ("event", CLUTTER_TYPE_STAGE);
+  g_signal_add_emission_hook (event_signal,
+                              0 /* detail */,
+                              event_emission_hook_cb,
+                              compositor, /* hook_data */
+                              NULL /* data_destroy */);
 
   meta_wayland_compositor_create_output (compositor, 0, 0, 1024, 600, 222, 125);
 

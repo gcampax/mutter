@@ -177,7 +177,15 @@ libmutter_la_SOURCES =				\
 if HAVE_WAYLAND
 libmutter_la_SOURCES +=				\
 	wayland/meta-wayland.c			\
-	wayland/meta-wayland-private.h
+	wayland/meta-wayland-data-device.c      \
+	wayland/meta-wayland-data-device.h      \
+	wayland/meta-wayland-private.h		\
+	wayland/meta-wayland-keyboard.c		\
+	wayland/meta-wayland-keyboard.h		\
+	wayland/meta-wayland-pointer.c		\
+	wayland/meta-wayland-pointer.h		\
+	wayland/meta-wayland-seat.c		\
+	wayland/meta-wayland-seat.h
 endif
 
 libmutter_la_LDFLAGS = -no-undefined
