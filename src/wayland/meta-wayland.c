@@ -247,7 +247,8 @@ meta_wayland_surface_attach (struct wl_client *wayland_client,
                              struct wl_resource *wayland_buffer_resource,
                              gint32 sx, gint32 sy)
 {
-  MetaWaylandSurface *surface = wayland_surface_resource->data;
+  MetaWaylandSurface *surface =
+    wl_resource_get_user_data (wayland_surface_resource);
   MetaWaylandBuffer *buffer;
 
   if (wayland_buffer_resource)
@@ -277,7 +278,7 @@ meta_wayland_surface_damage (struct wl_client *client,
                              gint32 width,
                              gint32 height)
 {
-  MetaWaylandSurface *surface = surface_resource->data;
+  MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   cairo_rectangle_int_t rectangle = { x, y, width, height };
 
   cairo_region_union_rectangle (surface->pending.damage, &rectangle);
@@ -286,7 +287,8 @@ meta_wayland_surface_damage (struct wl_client *client,
 static void
 destroy_frame_callback (struct wl_resource *callback_resource)
 {
-  MetaWaylandFrameCallback *callback = callback_resource->data;
+  MetaWaylandFrameCallback *callback =
+    wl_resource_get_user_data (callback_resource);
 
   wl_list_remove (&callback->link);
   g_slice_free (MetaWaylandFrameCallback, callback);
@@ -298,16 +300,17 @@ meta_wayland_surface_frame (struct wl_client *client,
                             guint32 callback_id)
 {
   MetaWaylandFrameCallback *callback;
-  MetaWaylandSurface *surface = surface_resource->data;
+  MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
 
   callback = g_slice_new0 (MetaWaylandFrameCallback);
   callback->compositor = surface->compositor;
-  callback->resource.object.interface = &wl_callback_interface;
-  callback->resource.object.id = callback_id;
-  callback->resource.destroy = destroy_frame_callback;
-  callback->resource.data = callback;
+  callback->resource = wl_client_add_object (client,
+                                             &wl_callback_interface,
+                                             NULL, /* no implementation */
+                                             callback_id,
+                                             callback);
+  wl_resource_set_destructor (callback->resource, destroy_frame_callback);
 
-  wl_client_add_resource (client, &callback->resource);
   wl_list_insert (surface->pending.frame_callback_list.prev, &callback->link);
 }
 
@@ -336,7 +339,7 @@ static void
 meta_wayland_surface_commit (struct wl_client *client,
                              struct wl_resource *resource)
 {
-  MetaWaylandSurface *surface = resource->data;
+  MetaWaylandSurface *surface = wl_resource_get_user_data (resource);
   MetaWaylandCompositor *compositor = surface->compositor;
 
   /* wl_surface.attach */
@@ -470,7 +473,7 @@ meta_wayland_surface_free (MetaWaylandSurface *surface)
 
   wl_list_for_each_safe (cb, next,
                          &surface->pending.frame_callback_list, link)
-    wl_resource_destroy (&cb->resource);
+    wl_resource_destroy (cb->resource);
 
   g_slice_free (MetaWaylandSurface, surface);
 
@@ -483,7 +486,7 @@ meta_wayland_surface_free (MetaWaylandSurface *surface)
 static void
 meta_wayland_surface_resource_destroy_cb (struct wl_resource *resource)
 {
-  MetaWaylandSurface *surface = resource->data;
+  MetaWaylandSurface *surface = wl_resource_get_user_data (resource);
   meta_wayland_surface_free (surface);
 }
 
@@ -502,26 +505,25 @@ meta_wayland_compositor_create_surface (struct wl_client *wayland_client,
                                         struct wl_resource *wayland_compositor_resource,
                                         guint32 id)
 {
-  MetaWaylandCompositor *compositor = wayland_compositor_resource->data;
+  MetaWaylandCompositor *compositor =
+    wl_resource_get_user_data (wayland_compositor_resource);
   MetaWaylandSurface *surface = g_slice_new0 (MetaWaylandSurface);
 
   surface->compositor = compositor;
 
-  surface->resource.destroy =
-    meta_wayland_surface_resource_destroy_cb;
-  surface->resource.object.id = id;
-  surface->resource.object.interface = &wl_surface_interface;
-  surface->resource.object.implementation =
-          (void (**)(void)) &meta_wayland_surface_interface;
-  surface->resource.data = surface;
+  surface->resource = wl_client_add_object (wayland_client,
+                                            &wl_surface_interface,
+                                            &meta_wayland_surface_interface,
+                                            id,
+                                            surface);
+  wl_resource_set_destructor (surface->resource,
+                              meta_wayland_surface_resource_destroy_cb);
 
   surface->pending.damage = cairo_region_create ();
 
   surface->pending.buffer_destroy_listener.notify =
     surface_handle_pending_buffer_destroy;
   wl_list_init (&surface->pending.frame_callback_list);
-
-  wl_client_add_resource (wayland_client, &surface->resource);
 
   compositor->surfaces = g_list_prepend (compositor->surfaces, surface);
 }
@@ -541,7 +543,7 @@ meta_wayland_region_add (struct wl_client *client,
                          gint32 width,
                          gint32 height)
 {
-  MetaWaylandRegion *region = resource->data;
+  MetaWaylandRegion *region = wl_resource_get_user_data (resource);
   cairo_rectangle_int_t rectangle = { x, y, width, height };
 
   cairo_region_union_rectangle (region->region, &rectangle);
@@ -555,7 +557,7 @@ meta_wayland_region_subtract (struct wl_client *client,
                               gint32 width,
                               gint32 height)
 {
-  MetaWaylandRegion *region = resource->data;
+  MetaWaylandRegion *region = wl_resource_get_user_data (resource);
   cairo_rectangle_int_t rectangle = { x, y, width, height };
 
   cairo_region_subtract_rectangle (region->region, &rectangle);
@@ -570,7 +572,7 @@ const struct wl_region_interface meta_wayland_region_interface = {
 static void
 meta_wayland_region_resource_destroy_cb (struct wl_resource *resource)
 {
-  MetaWaylandRegion *region = resource->data;
+  MetaWaylandRegion *region = wl_resource_get_user_data (resource);
 
   cairo_region_destroy (region->region);
   g_slice_free (MetaWaylandRegion, region);
@@ -583,17 +585,15 @@ meta_wayland_compositor_create_region (struct wl_client *wayland_client,
 {
   MetaWaylandRegion *region = g_slice_new0 (MetaWaylandRegion);
 
-  region->resource.destroy =
-    meta_wayland_region_resource_destroy_cb;
-  region->resource.object.id = id;
-  region->resource.object.interface = &wl_region_interface;
-  region->resource.object.implementation =
-          (void (**)(void)) &meta_wayland_region_interface;
-  region->resource.data = region;
+  region->resource = wl_client_add_object (wayland_client,
+                                           &wl_region_interface,
+                                           &meta_wayland_region_interface,
+                                           id,
+                                           region);
+  wl_resource_set_destructor (region->resource,
+                              meta_wayland_region_resource_destroy_cb);
 
   region->region = cairo_region_create ();
-
-  wl_client_add_resource (wayland_client, &region->resource);
 }
 
 static void
@@ -692,9 +692,9 @@ paint_finished_cb (ClutterActor *self, void *user_data)
       MetaWaylandFrameCallback *callback =
         wl_container_of (compositor->frame_callbacks.next, callback, link);
 
-      wl_resource_post_event (&callback->resource,
+      wl_resource_post_event (callback->resource,
                               WL_CALLBACK_DONE, get_time ());
-      wl_resource_destroy (&callback->resource);
+      wl_resource_destroy (callback->resource);
     }
 }
 
@@ -777,8 +777,8 @@ grab_pointer (MetaWaylandGrab *grab,
   grab->shell_surface = shell_surface;
   grab->shell_surface_destroy_listener.notify =
     destroy_shell_surface_grab_listener;
-  wl_signal_add (&shell_surface->resource.destroy_signal,
-                 &grab->shell_surface_destroy_listener);
+  wl_resource_add_destroy_listener (shell_surface->resource,
+                                    &grab->shell_surface_destroy_listener);
 
   grab->pointer = pointer;
   grab->grab.focus = shell_surface->surface;
@@ -893,8 +893,8 @@ shell_surface_move (struct wl_client *client,
                     struct wl_resource *seat_resource,
                     guint32 serial)
 {
-  MetaWaylandSeat *seat = seat_resource->data;
-  MetaWaylandShellSurface *shell_surface = resource->data;
+  MetaWaylandSeat *seat = wl_resource_get_user_data (seat_resource);
+  MetaWaylandShellSurface *shell_surface = wl_resource_get_user_data (resource);
 
   if (seat->pointer.button_count == 0 ||
       seat->pointer.grab_serial != serial ||
@@ -953,7 +953,7 @@ shell_surface_set_toplevel (struct wl_client *client,
                             struct wl_resource *resource)
 {
   MetaWaylandCompositor *compositor = &_meta_wayland_compositor;
-  MetaWaylandShellSurface *shell_surface = resource->data;
+  MetaWaylandShellSurface *shell_surface = wl_resource_get_user_data (resource);
   MetaWaylandSurface *surface = shell_surface->surface;
 
   /* NB: Surfaces from xwayland become managed based on X events. */
@@ -974,7 +974,7 @@ shell_surface_set_transient (struct wl_client *client,
                              guint32 flags)
 {
   MetaWaylandCompositor *compositor = &_meta_wayland_compositor;
-  MetaWaylandShellSurface *shell_surface = resource->data;
+  MetaWaylandShellSurface *shell_surface = wl_resource_get_user_data (resource);
   MetaWaylandSurface *surface = shell_surface->surface;
 
   /* NB: Surfaces from xwayland become managed based on X events. */
@@ -992,7 +992,7 @@ shell_surface_set_fullscreen (struct wl_client *client,
                               struct wl_resource *output)
 {
   MetaWaylandCompositor *compositor = &_meta_wayland_compositor;
-  MetaWaylandShellSurface *shell_surface = resource->data;
+  MetaWaylandShellSurface *shell_surface = wl_resource_get_user_data (resource);
   MetaWaylandSurface *surface = shell_surface->surface;
 
   /* NB: Surfaces from xwayland become managed based on X events. */
@@ -1059,13 +1059,13 @@ shell_handle_surface_destroy (struct wl_listener *listener,
     wl_container_of (listener, shell_surface, surface_destroy_listener);
   shell_surface->surface->has_shell_surface = FALSE;
   shell_surface->surface = NULL;
-  wl_resource_destroy (&shell_surface->resource);
+  wl_resource_destroy (shell_surface->resource);
 }
 
 static void
 destroy_shell_surface (struct wl_resource *resource)
 {
-  MetaWaylandShellSurface *shell_surface = resource->data;
+  MetaWaylandShellSurface *shell_surface = wl_resource_get_user_data (resource);
 
   /* In case cleaning up a dead client destroys shell_surface first */
   if (shell_surface->surface)
@@ -1083,7 +1083,7 @@ get_shell_surface (struct wl_client *client,
                    guint32 id,
                    struct wl_resource *surface_resource)
 {
-  MetaWaylandSurface *surface = surface_resource->data;
+  MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   MetaWaylandShellSurface *shell_surface;
 
   if (surface->has_shell_surface)
@@ -1095,20 +1095,20 @@ get_shell_surface (struct wl_client *client,
     }
 
   shell_surface = g_new0 (MetaWaylandShellSurface, 1);
-  shell_surface->resource.destroy = destroy_shell_surface;
-  shell_surface->resource.object.id = id;
-  shell_surface->resource.object.interface = &wl_shell_surface_interface;
-  shell_surface->resource.object.implementation =
-    (void (**) (void)) &meta_wayland_shell_surface_interface;
-  shell_surface->resource.data = shell_surface;
+
+  shell_surface->resource =
+    wl_client_add_object (client,
+                          &wl_shell_surface_interface,
+                          &meta_wayland_shell_surface_interface,
+                          id,
+                          shell_surface);
+  wl_resource_set_destructor (shell_surface->resource, destroy_shell_surface);
 
   shell_surface->surface = surface;
   shell_surface->surface_destroy_listener.notify = shell_handle_surface_destroy;
-  wl_signal_add (&surface->resource.destroy_signal,
-                 &shell_surface->surface_destroy_listener);
+  wl_resource_add_destroy_listener (surface->resource,
+                                    &shell_surface->surface_destroy_listener);
   surface->has_shell_surface = TRUE;
-
-  wl_client_add_resource (client, &shell_surface->resource);
 }
 
 static const struct wl_shell_interface meta_wayland_shell_interface =
@@ -1415,8 +1415,9 @@ xserver_set_window_id (struct wl_client *client,
                        struct wl_resource *surface_resource,
                        guint32 xid)
 {
-  MetaWaylandCompositor *compositor = compositor_resource->data;
-  MetaWaylandSurface *surface = surface_resource->data;
+  MetaWaylandCompositor *compositor =
+    wl_resource_get_user_data (compositor_resource);
+  MetaWaylandSurface *surface = wl_resource_get_user_data (surface_resource);
   MetaDisplay *display = meta_get_display ();
   MetaWindow *window;
 

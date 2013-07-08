@@ -65,13 +65,13 @@ typedef struct
 
 typedef struct
 {
-  struct wl_resource resource;
+  struct wl_resource *resource;
   cairo_region_t *region;
 } MetaWaylandRegion;
 
 struct _MetaWaylandSurface
 {
-  struct wl_resource resource;
+  struct wl_resource *resource;
   MetaWaylandCompositor *compositor;
   guint32 xid;
   int x;
@@ -105,7 +105,7 @@ typedef struct _MetaWaylandSurface MetaWaylandSurface;
 typedef struct
 {
   MetaWaylandSurface *surface;
-  struct wl_resource resource;
+  struct wl_resource *resource;
   struct wl_listener surface_destroy_listener;
 } MetaWaylandShellSurface;
 
@@ -143,7 +143,7 @@ typedef struct
   /* Pointer back to the compositor */
   MetaWaylandCompositor *compositor;
 
-  struct wl_resource resource;
+  struct wl_resource *resource;
 } MetaWaylandFrameCallback;
 
 struct _MetaWaylandCompositor
