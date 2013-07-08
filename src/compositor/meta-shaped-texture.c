@@ -489,8 +489,9 @@ meta_shaped_texture_set_wayland_surface (MetaShapedTexture *stex,
 
   priv->wayland.surface = surface;
 
-  if (surface && surface->buffer)
-    meta_shaped_texture_attach_wayland_buffer (stex, surface->buffer);
+  if (surface && surface->buffer_ref.buffer)
+    meta_shaped_texture_attach_wayland_buffer (stex,
+                                               surface->buffer_ref.buffer);
 }
 
 MetaWaylandSurface *
@@ -566,49 +567,55 @@ wayland_surface_update_area (MetaShapedTexture *stex,
                              int                height)
 {
   MetaShapedTexturePrivate *priv;
-  struct wl_buffer *buffer;
+  MetaWaylandBuffer *buffer;
 
   priv = stex->priv;
 
   g_return_if_fail (priv->type == META_SHAPED_TEXTURE_TYPE_WAYLAND_SURFACE);
   g_return_if_fail (priv->texture != NULL);
 
-  buffer = priv->wayland.surface->buffer;
+  buffer = priv->wayland.surface->buffer_ref.buffer;
 
-  if (buffer && wl_buffer_is_shm (buffer))
+  if (buffer)
     {
-      CoglPixelFormat format;
+      struct wl_resource *resource = buffer->resource;
+      struct wl_shm_buffer *shm_buffer = wl_shm_buffer_get (resource);
 
-      switch (wl_shm_buffer_get_format (buffer))
+      if (shm_buffer)
         {
-#if G_BYTE_ORDER == G_BIG_ENDIAN
-          case WL_SHM_FORMAT_ARGB8888:
-            format = COGL_PIXEL_FORMAT_ARGB_8888_PRE;
-            break;
-          case WL_SHM_FORMAT_XRGB8888:
-            format = COGL_PIXEL_FORMAT_ARGB_8888;
-            break;
-#elif G_BYTE_ORDER == G_LITTLE_ENDIAN
-          case WL_SHM_FORMAT_ARGB8888:
-            format = COGL_PIXEL_FORMAT_BGRA_8888_PRE;
-            break;
-          case WL_SHM_FORMAT_XRGB8888:
-            format = COGL_PIXEL_FORMAT_BGRA_8888;
-            break;
-#endif
-          default:
-            g_warn_if_reached ();
-            format = COGL_PIXEL_FORMAT_ARGB_8888;
-        }
+          CoglPixelFormat format;
 
-      cogl_texture_set_region (priv->texture,
-                               x, y,
-                               x, y,
-                               width, height,
-                               width, height,
-                               format,
-                               wl_shm_buffer_get_stride (buffer),
-                               wl_shm_buffer_get_data (buffer));
+          switch (wl_shm_buffer_get_format (shm_buffer))
+            {
+#if G_BYTE_ORDER == G_BIG_ENDIAN
+            case WL_SHM_FORMAT_ARGB8888:
+              format = COGL_PIXEL_FORMAT_ARGB_8888_PRE;
+              break;
+            case WL_SHM_FORMAT_XRGB8888:
+              format = COGL_PIXEL_FORMAT_ARGB_8888;
+              break;
+#elif G_BYTE_ORDER == G_LITTLE_ENDIAN
+            case WL_SHM_FORMAT_ARGB8888:
+              format = COGL_PIXEL_FORMAT_BGRA_8888_PRE;
+              break;
+            case WL_SHM_FORMAT_XRGB8888:
+              format = COGL_PIXEL_FORMAT_BGRA_8888;
+              break;
+#endif
+            default:
+              g_warn_if_reached ();
+              format = COGL_PIXEL_FORMAT_ARGB_8888;
+            }
+
+          cogl_texture_set_region (priv->texture,
+                                   x, y,
+                                   x, y,
+                                   width, height,
+                                   width, height,
+                                   format,
+                                   wl_shm_buffer_get_stride (shm_buffer),
+                                   wl_shm_buffer_get_data (shm_buffer));
+        }
     }
 }
 #endif /* HAVE_WAYLAND */
@@ -731,8 +738,8 @@ meta_shaped_texture_set_pixmap (MetaShapedTexture *stex,
 
 #ifdef HAVE_WAYLAND
 void
-meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture *stex,
-                                           struct wl_buffer  *buffer)
+meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture  *stex,
+                                           MetaWaylandBuffer  *buffer)
 {
   MetaShapedTexturePrivate *priv;
 
@@ -745,7 +752,7 @@ meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture *stex,
    * a reference to the MetaWaylandSurface where we can access the
    * buffer without it being explicitly passed as an argument.
    */
-  g_return_if_fail (priv->wayland.surface->buffer == buffer);
+  g_return_if_fail (priv->wayland.surface->buffer_ref.buffer == buffer);
 
   if (buffer)
     {
@@ -753,9 +760,19 @@ meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture *stex,
         clutter_backend_get_cogl_context (clutter_get_default_backend ());
       CoglError *catch_error = NULL;
       CoglTexture *texture =
-        COGL_TEXTURE (cogl_wayland_texture_2d_new_from_buffer (ctx, buffer, &catch_error));
+        COGL_TEXTURE (cogl_wayland_texture_2d_new_from_buffer (ctx,
+                                                               buffer->resource,
+                                                               &catch_error));
       if (!texture)
-        cogl_error_free (catch_error);
+        {
+          cogl_error_free (catch_error);
+        }
+      else
+        {
+          buffer->width = cogl_texture_get_width (texture);
+          buffer->height = cogl_texture_get_height (texture);
+        }
+
       set_cogl_texture (stex, texture);
     }
   else

@@ -40,8 +40,8 @@ void meta_window_actor_process_wayland_damage (MetaWindowActor *self,
                                                int              height);
 void meta_window_actor_set_wayland_surface    (MetaWindowActor    *self,
                                                MetaWaylandSurface *surface);
-void meta_window_actor_attach_wayland_buffer  (MetaWindowActor  *self,
-                                               struct wl_buffer *buffer);
+void meta_window_actor_attach_wayland_buffer  (MetaWindowActor   *self,
+                                               MetaWaylandBuffer *buffer);
 #endif
 
 void meta_window_actor_pre_paint      (MetaWindowActor    *self);

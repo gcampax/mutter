@@ -94,8 +94,8 @@ void meta_shaped_texture_update_area (MetaShapedTexture *stex,
 void meta_shaped_texture_set_pixmap (MetaShapedTexture *stex,
                                      Pixmap             pixmap);
 #ifdef HAVE_WAYLAND
-void meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture *stex,
-                                                struct wl_buffer  *buffer);
+void meta_shaped_texture_attach_wayland_buffer (MetaShapedTexture  *stex,
+                                                MetaWaylandBuffer  *buffer);
 #endif
 
 CoglTexture * meta_shaped_texture_get_texture (MetaShapedTexture *stex);

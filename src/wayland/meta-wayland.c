@@ -128,10 +128,88 @@ wayland_event_source_new (struct wl_display *display)
 }
 
 static void
+meta_wayland_buffer_destroy_handler (struct wl_listener *listener,
+                                     void *data)
+{
+  MetaWaylandBuffer *buffer =
+    wl_container_of (listener, buffer, destroy_listener);
+
+  wl_signal_emit (&buffer->destroy_signal, buffer);
+  g_slice_free (MetaWaylandBuffer, buffer);
+}
+
+static MetaWaylandBuffer *
+meta_wayland_buffer_from_resource (struct wl_resource *resource)
+{
+  MetaWaylandBuffer *buffer;
+  struct wl_listener *listener;
+
+  listener =
+    wl_resource_get_destroy_listener (resource,
+                                      meta_wayland_buffer_destroy_handler);
+
+  if (listener)
+    {
+      buffer = wl_container_of (listener, buffer, destroy_listener);
+    }
+  else
+    {
+      buffer = g_slice_new0 (MetaWaylandBuffer);
+
+      buffer->resource = resource;
+      wl_signal_init (&buffer->destroy_signal);
+      buffer->destroy_listener.notify = meta_wayland_buffer_destroy_handler;
+      wl_resource_add_destroy_listener (resource, &buffer->destroy_listener);
+    }
+
+  return buffer;
+}
+
+static void
+meta_wayland_buffer_reference_handle_destroy (struct wl_listener *listener,
+                                          void *data)
+{
+  MetaWaylandBufferReference *ref =
+    wl_container_of (listener, ref, destroy_listener);
+
+  g_assert (data == ref->buffer);
+
+  ref->buffer = NULL;
+}
+
+static void
+meta_wayland_buffer_reference (MetaWaylandBufferReference *ref,
+                               MetaWaylandBuffer *buffer)
+{
+  if (ref->buffer && buffer != ref->buffer)
+    {
+      ref->buffer->busy_count--;
+
+      if (ref->buffer->busy_count == 0)
+        {
+          g_assert (wl_resource_get_client (ref->buffer->resource));
+          wl_resource_queue_event (ref->buffer->resource, WL_BUFFER_RELEASE);
+        }
+
+      wl_list_remove (&ref->destroy_listener.link);
+    }
+
+  if (buffer && buffer != ref->buffer)
+    {
+      buffer->busy_count++;
+      wl_signal_add (&buffer->destroy_signal, &ref->destroy_listener);
+    }
+
+  ref->buffer = buffer;
+  ref->destroy_listener.notify = meta_wayland_buffer_reference_handle_destroy;
+}
+
+static void
 surface_process_damage (MetaWaylandSurface *surface,
                         cairo_region_t *region)
 {
-  if (surface->window)
+  if (surface->window &&
+      surface->buffer_ref.buffer)
     {
       MetaWindowActor *window_actor =
         META_WINDOW_ACTOR (meta_window_get_compositor_private (surface->window));
@@ -164,51 +242,18 @@ meta_wayland_surface_destroy (struct wl_client *wayland_client,
 }
 
 static void
-meta_wayland_surface_detach_buffer (MetaWaylandSurface *surface)
-{
-  struct wl_buffer *buffer = surface->buffer;
-
-  if (buffer)
-    {
-      wl_list_remove (&surface->buffer_destroy_listener.link);
-
-      surface->buffer = NULL;
-    }
-}
-
-static void
-meta_wayland_surface_detach_buffer_and_notify (MetaWaylandSurface *surface)
-{
-  struct wl_buffer *buffer = surface->buffer;
-
-  if (buffer)
-    {
-      g_assert (buffer->resource.client != NULL);
-      wl_resource_queue_event (&buffer->resource, WL_BUFFER_RELEASE);
-    }
-
-  meta_wayland_surface_detach_buffer (surface);
-}
-
-static void
-surface_handle_buffer_destroy (struct wl_listener *listener,
-                               void *data)
-{
-  MetaWaylandSurface *surface =
-    wl_container_of (listener, surface, buffer_destroy_listener);
-
-  meta_wayland_surface_detach_buffer (surface);
-}
-
-static void
 meta_wayland_surface_attach (struct wl_client *wayland_client,
                              struct wl_resource *wayland_surface_resource,
                              struct wl_resource *wayland_buffer_resource,
                              gint32 sx, gint32 sy)
 {
   MetaWaylandSurface *surface = wayland_surface_resource->data;
-  struct wl_buffer *buffer =
-    wayland_buffer_resource ? wayland_buffer_resource->data : NULL;
+  MetaWaylandBuffer *buffer;
+
+  if (wayland_buffer_resource)
+    buffer = meta_wayland_buffer_from_resource (wayland_buffer_resource);
+  else
+    buffer = NULL;
 
   /* Attach without commit in between does not send wl_buffer.release */
   if (surface->pending.buffer)
@@ -220,7 +265,7 @@ meta_wayland_surface_attach (struct wl_client *wayland_client,
   surface->pending.newly_attached = TRUE;
 
   if (buffer)
-    wl_signal_add (&buffer->resource.destroy_signal,
+    wl_signal_add (&buffer->destroy_signal,
                    &surface->pending.buffer_destroy_listener);
 }
 
@@ -296,18 +341,17 @@ meta_wayland_surface_commit (struct wl_client *client,
 
   /* wl_surface.attach */
   if (surface->pending.newly_attached &&
-      surface->pending.buffer != surface->buffer)
+      surface->buffer_ref.buffer != surface->pending.buffer)
     {
-      struct wl_buffer *buffer = surface->pending.buffer;
-
-      meta_wayland_surface_detach_buffer_and_notify (surface);
+      /* Note: we set this before informing any window-actor since the
+       * window actor will expect to find the new buffer within the
+       * surface. */
+      meta_wayland_buffer_reference (&surface->buffer_ref,
+                                     surface->pending.buffer);
 
       if (surface->pending.buffer)
         {
-          /* Note: we set this before informing any window-actor since
-           * the window actor will expect to find the new buffer
-           * within the surface. */
-          surface->buffer = surface->pending.buffer;
+          MetaWaylandBuffer *buffer = surface->pending.buffer;
 
           if (surface->window)
             {
@@ -319,8 +363,7 @@ meta_wayland_surface_commit (struct wl_client *client,
               meta_window_get_input_rect (surface->window, &rect);
 
               if (window_actor)
-                meta_window_actor_attach_wayland_buffer (window_actor,
-                                                         surface->pending.buffer);
+                meta_window_actor_attach_wayland_buffer (window_actor, buffer);
 
               /* XXX: we resize X based surfaces according to X events */
               if (surface->xid == 0 &&
@@ -329,9 +372,6 @@ meta_wayland_surface_commit (struct wl_client *client,
             }
           else if (surface == compositor->seat->sprite)
             meta_wayland_seat_update_sprite (compositor->seat);
-
-          wl_signal_add (&surface->buffer->resource.destroy_signal,
-                         &surface->buffer_destroy_listener);
         }
     }
 
@@ -405,7 +445,8 @@ meta_wayland_surface_free (MetaWaylandSurface *surface)
   MetaWaylandFrameCallback *cb, *next;
 
   compositor->surfaces = g_list_remove (compositor->surfaces, surface);
-  meta_wayland_surface_detach_buffer_and_notify (surface);
+
+  meta_wayland_buffer_reference (&surface->buffer_ref, NULL);
 
   if (surface->window)
     g_object_weak_unref (G_OBJECT (surface->window),
@@ -475,9 +516,6 @@ meta_wayland_compositor_create_surface (struct wl_client *wayland_client,
   surface->resource.data = surface;
 
   surface->pending.damage = cairo_region_create ();
-
-  surface->buffer_destroy_listener.notify =
-    surface_handle_buffer_destroy;
 
   surface->pending.buffer_destroy_listener.notify =
     surface_handle_pending_buffer_destroy;
@@ -884,9 +922,9 @@ ensure_surface_window (MetaWaylandSurface *surface)
     {
       int width, height;
 
-      if (surface->buffer)
+      if (surface->buffer_ref.buffer)
         {
-          struct wl_buffer *buffer = surface->buffer;
+          MetaWaylandBuffer *buffer = surface->buffer_ref.buffer;
           width = buffer->width;
           height = buffer->width;
         }

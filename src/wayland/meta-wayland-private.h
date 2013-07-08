@@ -43,6 +43,28 @@ typedef struct _MetaWaylandDataSource MetaWaylandDataSource;
 
 typedef struct
 {
+  struct wl_resource *resource;
+  struct wl_signal destroy_signal;
+  struct wl_listener destroy_listener;
+
+  union
+  {
+    struct wl_shm_buffer *shm_buffer;
+    struct wl_buffer *legacy_buffer;
+  };
+
+  int32_t width, height;
+  uint32_t busy_count;
+} MetaWaylandBuffer;
+
+typedef struct
+{
+  MetaWaylandBuffer *buffer;
+  struct wl_listener destroy_listener;
+} MetaWaylandBufferReference;
+
+typedef struct
+{
   struct wl_resource resource;
   cairo_region_t *region;
 } MetaWaylandRegion;
@@ -54,8 +76,7 @@ struct _MetaWaylandSurface
   guint32 xid;
   int x;
   int y;
-  struct wl_buffer *buffer;
-  struct wl_listener buffer_destroy_listener;
+  MetaWaylandBufferReference buffer_ref;
   MetaWindow *window;
   gboolean has_shell_surface;
 
@@ -64,7 +85,7 @@ struct _MetaWaylandSurface
   {
     /* wl_surface.attach */
     gboolean newly_attached;
-    struct wl_buffer *buffer;
+    MetaWaylandBuffer *buffer;
     struct wl_listener buffer_destroy_listener;
     int32_t sx;
     int32_t sy;

@@ -2459,7 +2459,7 @@ meta_window_actor_update_shape (MetaWindowActor *self)
 #ifdef HAVE_WAYLAND
 static void
 maybe_emit_size_changed (MetaWindowActor *self,
-                         struct wl_buffer *new_buffer)
+                         MetaWaylandBuffer *new_buffer)
 {
   MetaWindowActorPrivate *priv = self->priv;
   int                     width = 0, height = 0;
@@ -2498,13 +2498,13 @@ meta_window_actor_set_wayland_surface (MetaWindowActor *self,
 
   meta_shaped_texture_set_wayland_surface (META_SHAPED_TEXTURE (priv->actor),
                                            surface);
-  if (surface->buffer)
-    maybe_emit_size_changed (self, surface->buffer);
+  if (surface->buffer_ref.buffer)
+    maybe_emit_size_changed (self, surface->buffer_ref.buffer);
 }
 
 void
 meta_window_actor_attach_wayland_buffer (MetaWindowActor *self,
-                                         struct wl_buffer *buffer)
+                                         MetaWaylandBuffer *buffer)
 {
   MetaWindowActorPrivate *priv = self->priv;
   MetaShapedTexture *stex = META_SHAPED_TEXTURE (priv->actor);
