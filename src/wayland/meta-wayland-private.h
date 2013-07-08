@@ -292,14 +292,14 @@ struct _MetaWaylandKeyboard
 
 struct _MetaWaylandDataOffer
 {
-  struct wl_resource resource;
+  struct wl_resource *resource;
   MetaWaylandDataSource *source;
   struct wl_listener source_destroy_listener;
 };
 
 struct _MetaWaylandDataSource
 {
-  struct wl_resource resource;
+  struct wl_resource *resource;
   struct wl_array mime_types;
 
   void (*accept) (MetaWaylandDataSource * source,
