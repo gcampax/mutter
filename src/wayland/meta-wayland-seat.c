@@ -95,10 +95,9 @@ meta_wayland_seat_update_sprite (MetaWaylandSeat *seat)
       MetaWaylandStage *stage = META_WAYLAND_STAGE (seat->current_stage);
       ClutterBackend *backend = clutter_get_default_backend ();
       CoglContext *context = clutter_backend_get_cogl_context (backend);
+      struct wl_resource *buffer = seat->sprite->buffer_ref.buffer->resource;
       CoglTexture2D *texture =
-        cogl_wayland_texture_2d_new_from_buffer (context,
-                                                 seat->sprite->buffer,
-                                                 NULL);
+        cogl_wayland_texture_2d_new_from_buffer (context, buffer, NULL);
 
       meta_wayland_stage_set_cursor_from_texture (stage,
                                                   COGL_TEXTURE (texture),
@@ -143,7 +142,7 @@ pointer_set_cursor (struct wl_client *client,
 
       seat->sprite = surface;
 
-      if (seat->sprite->buffer)
+      if (seat->sprite->buffer_ref.buffer)
         meta_wayland_seat_update_sprite (seat);
     }
 }
