@@ -368,9 +368,6 @@ signal_handler (int signum)
         case SIGTERM:
           write (signal_pipe_fds[1], "T", 1);
           break;
-        case SIGCHLD:
-          write (signal_pipe_fds[1], "C", 1);
-          break;
         default:
           break;
         }
@@ -407,11 +404,6 @@ on_signal (GIOChannel *source,
     case 'T': /* SIGTERM */
       meta_quit (META_EXIT_SUCCESS);
       break;
-#ifdef HAVE_WAYLAND
-    case 'C': /* SIGCHLD */
-      meta_wayland_handle_sig_child ();
-      break;
-#endif
     default:
       g_warning ("Spurious character '%c' read from signal pipe", signal);
     }

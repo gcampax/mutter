@@ -1280,6 +1280,35 @@ bind_to_unix_socket (int display)
   return fd;
 }
 
+static void
+uncloexec (gpointer user_data)
+{
+  int fd = GPOINTER_TO_INT (user_data);
+
+  /* Make sure the client end of the socket pair doesn't get closed
+   * when we exec xwayland. */
+  int flags = fcntl (fd, F_GETFD);
+  if (flags != -1)
+    fcntl (fd, F_SETFD, flags & ~FD_CLOEXEC);
+}
+
+static void
+xserver_died (GPid     pid,
+	      gint     status,
+	      gpointer user_data)
+{
+  if (!WIFEXITED (status))
+    g_error ("X Wayland crashed; aborting");
+  else
+    {
+      /* For now we simply abort if we see the server exit.
+       *
+       * In the future X will only be loaded lazily for legacy X support
+       * but for now it's a hard requirement. */
+      g_error ("Spurious exit of X Wayland server");
+    }
+}
+
 static gboolean
 start_xwayland (MetaWaylandCompositor *compositor)
 {
@@ -1287,6 +1316,11 @@ start_xwayland (MetaWaylandCompositor *compositor)
   char *lockfile = NULL;
   int sp[2];
   pid_t pid;
+  char **env;
+  char *fd_string;
+  char *display_name;
+  char *args[11];
+  GError *error;
 
   do
     {
@@ -1338,45 +1372,39 @@ start_xwayland (MetaWaylandCompositor *compositor)
       return 1;
     }
 
-  switch ((pid = fork()))
+  env = g_get_environ ();
+  fd_string = g_strdup_printf ("%d", sp[1]);
+  env = g_environ_setenv (env, "WAYLAND_SOCKET", fd_string, TRUE);
+  g_free (fd_string);
+
+  display_name = g_strdup_printf (":%d",
+				  compositor->xwayland_display_index);
+
+  args[0] = XWAYLAND_PATH;
+  args[1] = display_name;
+  args[2] = "-wayland";
+  args[3] = "-rootless";
+  args[4] = "-retro";
+  args[5] = "-noreset";
+  args[6] = "-logfile";
+  args[7] = g_build_filename (g_get_user_cache_dir (), "xwayland.log", NULL);
+  args[8] = "-nolisten";
+  args[9] = "all";
+  args[10] = NULL;
+
+  error = NULL;
+  if (g_spawn_async (NULL, /* cwd */
+		     args,
+		     env,
+		     G_SPAWN_LEAVE_DESCRIPTORS_OPEN |
+		     G_SPAWN_DO_NOT_REAP_CHILD |
+		     G_SPAWN_STDOUT_TO_DEV_NULL |
+		     G_SPAWN_STDERR_TO_DEV_NULL,
+		     uncloexec,
+		     GINT_TO_POINTER (sp[1]),
+		     &pid,
+		     &error))
     {
-    case 0:
-        {
-          char *fd_string;
-          char *display_name;
-          /* Make sure the client end of the socket pair doesn't get closed
-           * when we exec xwayland. */
-          int flags = fcntl (sp[1], F_GETFD);
-          if (flags != -1)
-            fcntl (sp[1], F_SETFD, flags & ~FD_CLOEXEC);
-
-          fd_string = g_strdup_printf ("%d", sp[1]);
-          setenv ("WAYLAND_SOCKET", fd_string, 1);
-          g_free (fd_string);
-
-          display_name = g_strdup_printf (":%d",
-                                          compositor->xwayland_display_index);
-
-          if (execl (XWAYLAND_PATH,
-                     XWAYLAND_PATH,
-                     display_name,
-                     "-wayland",
-                     "-rootless",
-                     "-retro",
-                     "-noreset",
-                     /* FIXME: does it make sense to log to the filesystem by
-                      * default? */
-                     "-logfile", "/tmp/xwayland.log",
-                     "-nolisten", "all",
-                     NULL) < 0)
-            {
-              char *msg = strerror (errno);
-              g_warning ("xwayland exec failed: %s", msg);
-            }
-          exit (-1);
-          return FALSE;
-        }
-    default:
       g_message ("forked X server, pid %d\n", pid);
 
       close (sp[1]);
@@ -1384,12 +1412,15 @@ start_xwayland (MetaWaylandCompositor *compositor)
         wl_client_create (compositor->wayland_display, sp[0]);
 
       compositor->xwayland_pid = pid;
-      break;
-
-    case -1:
-      g_error ("Failed to fork for xwayland server");
-      return FALSE;
+      g_child_watch_add (pid, xserver_died, NULL);
     }
+  else
+    {
+      g_error ("Failed to fork for xwayland server: %s", error->message);
+    }
+
+  g_strfreev (env);
+  g_free (display_name);
 
   return TRUE;
 }
@@ -1818,28 +1849,4 @@ void
 meta_wayland_finalize (void)
 {
   stop_xwayland (meta_wayland_compositor_get_default ());
-}
-
-void
-meta_wayland_handle_sig_child (void)
-{
-  int status;
-  pid_t pid = waitpid (-1, &status, WNOHANG);
-  MetaWaylandCompositor *compositor = &_meta_wayland_compositor;
-
-  /* The simplest measure to avoid infinitely re-spawning a crashing
-   * X server */
-  if (pid == compositor->xwayland_pid)
-    {
-      if (!WIFEXITED (status))
-        g_critical ("X Wayland crashed; aborting");
-      else
-        {
-          /* For now we simply abort if we see the server exit.
-           *
-           * In the future X will only be loaded lazily for legacy X support
-           * but for now it's a hard requirement. */
-          g_critical ("Spurious exit of X Wayland server");
-        }
-    }
 }
