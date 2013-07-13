@@ -68,7 +68,7 @@ get_time (void)
 {
   struct timeval tv;
   gettimeofday (&tv, NULL);
-  return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+ return tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
 
 static gboolean
@@ -304,11 +304,10 @@ meta_wayland_surface_frame (struct wl_client *client,
 
   callback = g_slice_new0 (MetaWaylandFrameCallback);
   callback->compositor = surface->compositor;
-  callback->resource = wl_client_add_object (client,
-                                             &wl_callback_interface,
-                                             NULL, /* no implementation */
-                                             callback_id,
-                                             callback);
+  callback->resource = wl_resource_create (client,
+					   &wl_callback_interface, 1,
+					   callback_id);
+  wl_resource_set_user_data (callback->resource, callback);
   wl_resource_set_destructor (callback->resource, destroy_frame_callback);
 
   wl_list_insert (surface->pending.frame_callback_list.prev, &callback->link);
@@ -511,13 +510,13 @@ meta_wayland_compositor_create_surface (struct wl_client *wayland_client,
 
   surface->compositor = compositor;
 
-  surface->resource = wl_client_add_object (wayland_client,
-                                            &wl_surface_interface,
-                                            &meta_wayland_surface_interface,
-                                            id,
-                                            surface);
-  wl_resource_set_destructor (surface->resource,
-                              meta_wayland_surface_resource_destroy_cb);
+  /* a surface inherits the version from the compositor */
+  surface->resource = wl_resource_create (wayland_client,
+					  &wl_surface_interface,
+					  wl_resource_get_version (wayland_compositor_resource),
+					  id);
+  wl_resource_set_implementation (surface->resource, &meta_wayland_surface_interface, surface,
+				  meta_wayland_surface_resource_destroy_cb);
 
   surface->pending.damage = cairo_region_create ();
 
@@ -585,13 +584,12 @@ meta_wayland_compositor_create_region (struct wl_client *wayland_client,
 {
   MetaWaylandRegion *region = g_slice_new0 (MetaWaylandRegion);
 
-  region->resource = wl_client_add_object (wayland_client,
-                                           &wl_region_interface,
-                                           &meta_wayland_region_interface,
-                                           id,
-                                           region);
-  wl_resource_set_destructor (region->resource,
-                              meta_wayland_region_resource_destroy_cb);
+  region->resource = wl_resource_create (wayland_client,
+					 &wl_region_interface, 1,
+					 id);
+  wl_resource_set_implementation (region->resource,
+				  &meta_wayland_region_interface, region,
+				  meta_wayland_region_resource_destroy_cb);
 
   region->region = cairo_region_create ();
 }
@@ -604,7 +602,7 @@ bind_output (struct wl_client *client,
 {
   MetaWaylandOutput *output = data;
   struct wl_resource *resource =
-    wl_client_add_object (client, &wl_output_interface, NULL, id, data);
+    wl_resource_create (client, &wl_output_interface, version, id);
   GList *l;
 
   wl_resource_post_event (resource,
@@ -661,10 +659,9 @@ meta_wayland_compositor_create_output (MetaWaylandCompositor *compositor,
   output->width_mm = width_mm;
   output->height_mm = height_mm;
 
-  wl_display_add_global (compositor->wayland_display,
-                         &wl_output_interface,
-                         output,
-                         bind_output);
+  wl_global_create (compositor->wayland_display,
+		    &wl_output_interface, 2,
+		    output, bind_output);
 
   mode = g_slice_new0 (MetaWaylandMode);
   mode->flags = WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED;
@@ -705,9 +702,10 @@ compositor_bind (struct wl_client *client,
                  guint32 id)
 {
   MetaWaylandCompositor *compositor = data;
+  struct wl_resource *resource;
 
-  wl_client_add_object (client, &wl_compositor_interface,
-                        &meta_wayland_compositor_interface, id, compositor);
+  resource = wl_resource_create (client, &wl_compositor_interface, version, id);
+  wl_resource_set_implementation (resource, &meta_wayland_compositor_interface, compositor, NULL);
 }
 
 static void
@@ -1096,13 +1094,12 @@ get_shell_surface (struct wl_client *client,
 
   shell_surface = g_new0 (MetaWaylandShellSurface, 1);
 
+  /* a shell surface inherits the version from the shell */
   shell_surface->resource =
-    wl_client_add_object (client,
-                          &wl_shell_surface_interface,
-                          &meta_wayland_shell_surface_interface,
-                          id,
-                          shell_surface);
-  wl_resource_set_destructor (shell_surface->resource, destroy_shell_surface);
+    wl_resource_create (client, &wl_shell_surface_interface,
+			wl_resource_get_version (resource), id);
+  wl_resource_set_implementation (shell_surface->resource, &meta_wayland_shell_surface_interface,
+				  shell_surface, destroy_shell_surface);
 
   shell_surface->surface = surface;
   shell_surface->surface_destroy_listener.notify = shell_handle_surface_destroy;
@@ -1122,8 +1119,10 @@ bind_shell (struct wl_client *client,
             guint32 version,
             guint32 id)
 {
-  wl_client_add_object (client, &wl_shell_interface,
-                        &meta_wayland_shell_interface, id, data);
+  struct wl_resource *resource;
+
+  resource = wl_resource_create (client, &wl_shell_interface, version, id);
+  wl_resource_set_implementation (resource, &meta_wayland_shell_interface, data, NULL);
 }
 
 static char *
@@ -1511,9 +1510,9 @@ bind_xserver (struct wl_client *client,
     return;
 
   compositor->xserver_resource =
-    wl_client_add_object (client, &xserver_interface,
-                          &xserver_implementation, id,
-                          compositor);
+    wl_resource_create (client, &xserver_interface, version, id);
+  wl_resource_set_implementation (compositor->xserver_resource,
+				  &xserver_implementation, compositor, NULL);
 
   wl_resource_post_event (compositor->xserver_resource,
                           XSERVER_LISTEN_SOCKET,
@@ -1522,7 +1521,6 @@ bind_xserver (struct wl_client *client,
   wl_resource_post_event (compositor->xserver_resource,
                           XSERVER_LISTEN_SOCKET,
                           compositor->xwayland_unix_fd);
-  g_warning ("bind_xserver");
 
   /* Make sure xwayland will recieve the above sockets in a finite
    * time before unblocking the initialization mainloop since we are
@@ -1748,10 +1746,9 @@ meta_wayland_init (void)
 
   wl_list_init (&compositor->frame_callbacks);
 
-  if (!wl_display_add_global (compositor->wayland_display,
-                              &wl_compositor_interface,
-			      compositor,
-                              compositor_bind))
+  if (!wl_global_create (compositor->wayland_display,
+			 &wl_compositor_interface, 1,
+			 compositor, compositor_bind))
     g_error ("Failed to register wayland compositor object");
 
   compositor->wayland_loop =
@@ -1805,8 +1802,9 @@ meta_wayland_init (void)
 
   meta_wayland_compositor_create_output (compositor, 0, 0, 1024, 600, 222, 125);
 
-  if (wl_display_add_global (compositor->wayland_display, &wl_shell_interface,
-                             compositor, bind_shell) == NULL)
+  if (wl_global_create (compositor->wayland_display,
+			&wl_shell_interface, 1,
+			compositor, bind_shell) == NULL)
     g_error ("Failed to register a global shell object");
 
   clutter_actor_show (compositor->stage);
@@ -1814,10 +1812,9 @@ meta_wayland_init (void)
   if (wl_display_add_socket (compositor->wayland_display, "wayland-0"))
     g_error ("Failed to create socket");
 
-  wl_display_add_global (compositor->wayland_display,
-                         &xserver_interface,
-                         compositor,
-                         bind_xserver);
+  wl_global_create (compositor->wayland_display,
+		    &xserver_interface, 1,
+		    compositor, bind_xserver);
 
   /* We need a mapping from xids to wayland surfaces... */
   compositor->window_surfaces = g_hash_table_new (g_int_hash, g_int_equal);
