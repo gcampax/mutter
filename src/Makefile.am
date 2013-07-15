@@ -176,6 +176,8 @@ libmutter_la_SOURCES =				\
 
 if HAVE_WAYLAND
 libmutter_la_SOURCES +=				\
+	wayland/meta-tty.c			\
+	wayland/meta-tty.h			\
 	wayland/meta-wayland.c			\
 	wayland/meta-wayland-data-device.c      \
 	wayland/meta-wayland-data-device.h      \
@@ -187,7 +189,9 @@ libmutter_la_SOURCES +=				\
 	wayland/meta-wayland-seat.c		\
 	wayland/meta-wayland-seat.h		\
 	wayland/meta-wayland-stage.h		\
-	wayland/meta-wayland-stage.c
+	wayland/meta-wayland-stage.c		\
+	wayland/meta-weston-launch.c		\
+	wayland/meta-weston-launch.h
 endif
 
 libmutter_la_LDFLAGS = -no-undefined

@@ -259,7 +259,7 @@ if test x$enable_wayland = "xyes"; then
 fi
 
 if test x$have_wayland = "xyes"; then
-  MUTTER_PC_MODULES="$MUTTER_PC_MODULES wayland-server clutter-wayland-compositor-1.0"
+  MUTTER_PC_MODULES="$MUTTER_PC_MODULES wayland-server clutter-wayland-compositor-1.0 libdrm"
   AC_DEFINE(HAVE_WAYLAND, , [Building with Wayland support])
   AC_SUBST(XWAYLAND_PATH)
 fi
