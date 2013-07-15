@@ -2638,7 +2638,8 @@ meta_display_handle_event (MetaDisplay *display,
           {
             MetaWaylandCompositor *compositor =
               meta_wayland_compositor_get_default ();
-            meta_wayland_compositor_set_input_focus (compositor, window);
+            if (meta_is_display_server ())
+              meta_wayland_compositor_set_input_focus (compositor, window);
           }
 #endif
           /* fall through */
@@ -3206,7 +3207,8 @@ event_callback (XEvent  *event,
      position from the surface position. Instead we bypass the
      translation altogether by directly using the Clutter events */
 #ifdef HAVE_WAYLAND
-  if (event->type == MotionNotify)
+  if (event->type == MotionNotify &&
+      meta_is_display_server ())
     return FALSE;
 #endif
 
