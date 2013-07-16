@@ -365,6 +365,27 @@ on_sigterm (gpointer user_data)
   return G_SOURCE_REMOVE;
 }
 
+static void
+crash_handler (int signum)
+{
+  char buffer[256];
+  MetaWaylandCompositor *compositor;
+  MetaTTY *tty;
+
+  snprintf (buffer, 256, "Fatal server error: %s\n", strsignal (signum));
+  write (STDERR_FILENO, buffer, strlen (buffer));
+
+  compositor = meta_wayland_compositor_get_default ();
+  tty = meta_wayland_compositor_get_tty (compositor);
+
+  /* Passing FALSE ensures that we only do ioctls, which is
+     safe from a signal handler */
+  meta_tty_reset (tty, FALSE);
+
+  /* We can't continue with the default handling, so just exit here */
+  _exit(1);
+}
+
 /**
  * meta_init: (skip)
  *
@@ -389,6 +410,19 @@ meta_init (void)
     g_printerr ("Failed to register SIGXFSZ handler: %s\n",
                 g_strerror (errno));
 #endif
+
+  if (meta_is_display_server ())
+    {
+      act.sa_handler = crash_handler;
+
+      /* Ignore if we can't register signal handlers, worse
+         that can happen one needs the sysrq to get out of the VT */
+      sigaction (SIGABRT, &act, NULL);
+      sigaction (SIGSEGV, &act, NULL);
+      sigaction (SIGBUS, &act, NULL);
+      sigaction (SIGFPE, &act, NULL);
+      sigaction (SIGTRAP, &act, NULL);
+    }
 
   /* Revert weston-launch brokenness */
   sigemptyset (&empty_mask);
