@@ -1953,3 +1953,9 @@ meta_wayland_finalize (void)
   stop_xwayland (compositor);
   g_clear_object (&compositor->tty);
 }
+
+MetaTTY *
+meta_wayland_compositor_get_tty (MetaWaylandCompositor *compositor)
+{
+  return compositor->tty;
+}
