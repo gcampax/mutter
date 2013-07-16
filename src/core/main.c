@@ -390,7 +390,15 @@ meta_init (void)
                 g_strerror (errno));
 #endif
 
+  /* Revert weston-launch brokenness */
+  sigemptyset (&empty_mask);
+  sigaddset (&empty_mask, SIGTERM);
+  sigaddset (&empty_mask, SIGCHLD);
+  sigaddset (&empty_mask, SIGINT);
+  sigprocmask (SIG_UNBLOCK, &empty_mask, NULL);
+
   g_unix_signal_add (SIGTERM, on_sigterm, NULL);
+  g_unix_signal_add (SIGINT, on_sigterm, NULL);
 
   if (g_getenv ("MUTTER_VERBOSE"))
     meta_set_verbose (TRUE);
