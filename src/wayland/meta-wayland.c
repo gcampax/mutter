@@ -58,6 +58,13 @@
 
 static MetaWaylandCompositor _meta_wayland_compositor;
 
+static gboolean meta_synthetize_key_event (MetaDisplay           *display,
+					   const ClutterEvent    *event,
+					   MetaWaylandCompositor *compositor);
+static gboolean meta_synthetize_motion_event (MetaDisplay           *display,
+					      const ClutterEvent    *event,
+					      MetaWaylandCompositor *compositor);
+
 MetaWaylandCompositor *
 meta_wayland_compositor_get_default (void)
 {
@@ -1544,15 +1551,14 @@ stage_destroy_cb (void)
 }
 
 static gboolean
-event_cb (ClutterActor *stage,
-          const ClutterEvent *event,
-          MetaWaylandCompositor *compositor)
+captured_event_cb (ClutterActor *stage,
+		   const ClutterEvent *event,
+		   MetaWaylandCompositor *compositor)
 {
   MetaWaylandSeat *seat = compositor->seat;
   MetaWaylandPointer *pointer = &seat->pointer;
   MetaWaylandSurface *surface;
   MetaDisplay *display;
-  XMotionEvent xevent;
 
   meta_wayland_seat_handle_event (compositor->seat, event);
 
@@ -1608,19 +1614,48 @@ event_cb (ClutterActor *stage,
       return FALSE;
 
     case CLUTTER_MOTION:
-      break;
+      return meta_synthetize_motion_event (display, event, compositor);
+
+    case CLUTTER_KEY_PRESS:
+    case CLUTTER_KEY_RELEASE:
+      return meta_synthetize_key_event (display, event, compositor);
 
     default:
       return FALSE;
     }
+}
 
-  xevent.type = MotionNotify;
-  xevent.is_hint = NotifyNormal;
-  xevent.same_screen = TRUE;
-  xevent.serial = 0;
-  xevent.send_event = False;
-  xevent.display = display->xdisplay;
-  xevent.root = DefaultRootWindow (display->xdisplay);
+static gboolean
+meta_synthetize_motion_event (MetaDisplay           *display,
+			      const ClutterEvent    *event,
+			      MetaWaylandCompositor *compositor)
+{
+  MetaWaylandSeat *seat = compositor->seat;
+  MetaWaylandPointer *pointer = &seat->pointer;
+  MetaWaylandSurface *surface;
+  XGenericEventCookie cookie;
+  XIDeviceEvent xievent;
+
+  cookie.type = GenericEvent;
+  cookie.serial = 0;
+  cookie.send_event = False;
+  cookie.display = display->xdisplay;
+  cookie.extension = display->xinput_opcode;
+  cookie.evtype = XI_Motion;
+  cookie.cookie = 0;
+  cookie.data = &xievent;
+
+  xievent.type = GenericEvent;
+  xievent.serial = 0;
+  xievent.send_event = False;
+  xievent.display = display->xdisplay;
+  xievent.extension = display->xinput_opcode;
+  xievent.evtype = XI_Motion;
+  xievent.time = clutter_event_get_time (event);
+  xievent.deviceid = META_VIRTUAL_CORE_KEYBOARD_ID;
+  xievent.sourceid = clutter_event_get_device_id (event);
+  xievent.detail = NotifyNormal;
+  xievent.root = DefaultRootWindow (display->xdisplay);
 
   if (compositor->implicit_grab_surface)
     surface = compositor->implicit_grab_surface;
@@ -1629,8 +1664,8 @@ event_cb (ClutterActor *stage,
 
   if (surface == pointer->current)
     {
-      xevent.x = wl_fixed_to_int (pointer->current_x);
-      xevent.y = wl_fixed_to_int (pointer->current_y);
+      xievent.event_x = wl_fixed_to_double (pointer->current_x);
+      xievent.event_y = wl_fixed_to_double (pointer->current_y);
     }
   else if (surface && surface->window)
     {
@@ -1645,38 +1680,151 @@ event_cb (ClutterActor *stage,
                                                wl_fixed_to_double (pointer->y),
                                                &ax, &ay);
 
-          xevent.x = ax;
-          xevent.y = ay;
+          xievent.event_x = ax;
+          xievent.event_y = ay;
         }
       else
         {
-          xevent.x = wl_fixed_to_int (pointer->x);
-          xevent.y = wl_fixed_to_int (pointer->y);
+          xievent.event_x = wl_fixed_to_double (pointer->x);
+          xievent.event_y = wl_fixed_to_double (pointer->y);
         }
     }
   else
     {
-      xevent.x = wl_fixed_to_int (pointer->x);
-      xevent.y = wl_fixed_to_int (pointer->y);
+      xievent.event_x = wl_fixed_to_double (pointer->x);
+      xievent.event_y = wl_fixed_to_double (pointer->y);
     }
 
+  xievent.root_x = wl_fixed_to_double (pointer->x);
+  xievent.root_y = wl_fixed_to_double (pointer->y);
+
+  /* FIXME: if the surface is not a X11 window, we're not processing window
+     keybindings for it, because we report the events on the root window */
   if (surface && surface->xid != None)
-    xevent.window = surface->xid;
+    xievent.event = surface->xid;
   else
-    xevent.window = xevent.root;
+    xievent.event = xievent.root;
 
   /* Mutter doesn't really know about the sub-windows. This assumes it
      doesn't care either */
-  xevent.subwindow = xevent.window;
-  xevent.time = event->any.time;
-  xevent.x_root = wl_fixed_to_int (pointer->x);
-  xevent.y_root = wl_fixed_to_int (pointer->y);
-  /* The Clutter state flags exactly match the X values */
-  xevent.state = clutter_event_get_state (event);
+  xievent.child = xievent.event;
+  xievent.flags = 0;
 
-  meta_display_handle_event (display, (XEvent *) &xevent);
+  /* Mutter only cares about the effective modifiers, so let's clear
+     this out and set what we have readily available from Clutter.
+     We could fill the other fields from xkbcommon as well, but for
+     now this is easier.
+  */
+  memset (&xievent.buttons, 0, sizeof (XIButtonState));
+  memset (&xievent.valuators, 0, sizeof (XIValuatorState));
+  memset (&xievent.mods, 0, sizeof (XIModifierState));
+  memset (&xievent.group, 0, sizeof (XIGroupState));
 
-  return FALSE;
+  xievent.mods.effective = clutter_event_get_state (event);
+
+  return meta_display_handle_event (display, (XEvent *) &cookie);
+}
+
+static gboolean
+meta_synthetize_key_event (MetaDisplay           *display,
+			   const ClutterEvent    *event,
+			   MetaWaylandCompositor *compositor)
+{
+  MetaWaylandSeat *seat = compositor->seat;
+  MetaWaylandKeyboard *keyboard = &seat->keyboard;
+  MetaWaylandPointer *pointer = &seat->pointer;
+  MetaWaylandSurface *surface;
+  XGenericEventCookie cookie;
+  XIDeviceEvent xievent;
+
+  /* I think in real XLib cookie and xievent share some of the underlying
+     memory (that would explain why the first fields are the same), but I'm not
+     sure and I don't care */
+
+  cookie.type = GenericEvent;
+  cookie.serial = 0;
+  cookie.send_event = False;
+  cookie.display = display->xdisplay;
+  cookie.extension = display->xinput_opcode;
+  cookie.evtype = event->type == CLUTTER_KEY_PRESS ? XI_KeyPress : XI_KeyRelease;
+  cookie.cookie = 0;
+  cookie.data = &xievent;
+
+  xievent.type = GenericEvent;
+  xievent.serial = 0;
+  xievent.send_event = False;
+  xievent.display = display->xdisplay;
+  xievent.extension = display->xinput_opcode;
+  xievent.evtype = cookie.evtype;
+  xievent.time = clutter_event_get_time (event);
+  xievent.deviceid = META_VIRTUAL_CORE_KEYBOARD_ID;
+  xievent.sourceid = clutter_event_get_device_id (event);
+  xievent.detail = clutter_event_get_key_code (event);
+  xievent.root = DefaultRootWindow (display->xdisplay);
+
+  surface = keyboard->focus;
+
+  if (surface == pointer->current)
+    {
+      xievent.event_x = wl_fixed_to_double (pointer->current_x);
+      xievent.event_y = wl_fixed_to_double (pointer->current_y);
+    }
+  else if (surface && surface->window)
+    {
+      ClutterActor *window_actor =
+        CLUTTER_ACTOR (meta_window_get_compositor_private (surface->window));
+      float ax, ay;
+
+      if (window_actor)
+        {
+          clutter_actor_transform_stage_point (window_actor,
+                                               wl_fixed_to_double (pointer->x),
+                                               wl_fixed_to_double (pointer->y),
+                                               &ax, &ay);
+
+          xievent.event_x = ax;
+          xievent.event_y = ay;
+        }
+      else
+        {
+          xievent.event_x = wl_fixed_to_double (pointer->x);
+          xievent.event_y = wl_fixed_to_double (pointer->y);
+        }
+    }
+  else
+    {
+      xievent.event_x = wl_fixed_to_double (pointer->x);
+      xievent.event_y = wl_fixed_to_double (pointer->y);
+    }
+
+  xievent.root_x = wl_fixed_to_double (pointer->x);
+  xievent.root_y = wl_fixed_to_double (pointer->y);
+
+  /* FIXME: if the surface is not a X11 window, we're not processing window
+     keybindings for it, because we report the events on the root window */
+  if (surface && surface->xid != None)
+    xievent.event = surface->xid;
+  else
+    xievent.event = xievent.root;
+
+  /* Mutter doesn't really know about the sub-windows. This assumes it
+     doesn't care either */
+  xievent.child = xievent.event;
+  xievent.flags = 0;
+
+  /* Mutter only cares about the effective modifiers, so let's clear
+     this out and set what we have readily available from Clutter.
+     We could fill the other fields from xkbcommon as well, but for
+     now this is easier.
+  */
+  memset (&xievent.buttons, 0, sizeof (XIButtonState));
+  memset (&xievent.valuators, 0, sizeof (XIValuatorState));
+  memset (&xievent.mods, 0, sizeof (XIModifierState));
+  memset (&xievent.group, 0, sizeof (XIGroupState));
+
+  xievent.mods.effective = clutter_event_get_state (event);
+
+  return meta_display_handle_event (display, (XEvent *) &cookie);
 }
 
 static gboolean
@@ -1711,18 +1859,18 @@ event_emission_hook_cb (GSignalInvocationHint *ihint,
     case CLUTTER_BUTTON_RELEASE:
     case CLUTTER_SCROLL:
       if (actor == clutter_get_pointer_grab ())
-        event_cb (clutter_actor_get_stage (actor),
-                  event,
-                  compositor);
+        captured_event_cb (clutter_actor_get_stage (actor),
+			   event,
+			   compositor);
       break;
 
       /* Keyboard events */
     case CLUTTER_KEY_PRESS:
     case CLUTTER_KEY_RELEASE:
       if (actor == clutter_get_keyboard_grab ())
-        event_cb (clutter_actor_get_stage (actor),
-                  event,
-                  compositor);
+        captured_event_cb (clutter_actor_get_stage (actor),
+			   event,
+			   compositor);
 
     default:
       break;
@@ -1888,7 +2036,7 @@ meta_wayland_init (void)
 
   g_signal_connect (compositor->stage,
                     "captured-event",
-                    G_CALLBACK (event_cb),
+                    G_CALLBACK (captured_event_cb),
                     compositor);
   /* If something sets a grab on an actor then the captured event
    * signal won't get emitted but we still want to see these events so

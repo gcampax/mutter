@@ -3226,6 +3226,31 @@ meta_display_handle_event (MetaDisplay *display,
 }
 
 static gboolean
+event_is_filtered_in_wayland (MetaDisplay *display,
+                              XEvent      *event)
+{
+  XIDeviceEvent *input_event;
+
+  if (event->type == MotionNotify ||
+      event->type == KeyPress ||
+      event->type == KeyRelease)
+    return TRUE;
+
+  input_event = (XIDeviceEvent *) get_input_event (display, event);
+
+  /* Careful! input_event->type exists, but it's
+     always GenericEvent */
+
+  if (input_event &&
+      (input_event->evtype == XI_Motion ||
+       input_event->evtype == XI_KeyPress ||
+       input_event->evtype == XI_KeyRelease))
+    return TRUE;
+
+  return FALSE;
+}
+
+static gboolean
 event_callback (XEvent  *event,
                 gpointer data)
 {
@@ -3240,10 +3265,27 @@ event_callback (XEvent  *event,
      dragging a window around then the window will jump around
      erratically because of the lag between updating the window
      position from the surface position. Instead we bypass the
-     translation altogether by directly using the Clutter events */
+     translation altogether by directly using the Clutter events.
+
+     Additionally, we want to filter out all keyboard events as well,
+     because we synthetize them from a Clutter captured-event handler.
+     This is necessary because keyboard grabs don't work with X in
+     rootless mode, and because there is no root window to listen
+     for events.
+     We filter both core and XI2 events, although we should never
+     see core events of those types.
+
+     In the end, what happens is:
+     Clutter -> captured-event -> meta_display_handle_event
+       if TRUE:
+          event is handled
+       if FALSE:
+          event is propagated to Clutter -> MetaWaylandKeyboard -> XWayland
+          maybe here again, we return FALSE -> Gdk
+  */
 #ifdef HAVE_WAYLAND
-  if (event->type == MotionNotify &&
-      meta_is_display_server ())
+  if (meta_is_display_server () &&
+      event_is_filtered_in_wayland (display, event))
     return FALSE;
 #endif
 
