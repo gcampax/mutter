@@ -129,7 +129,6 @@ typedef struct
 
 struct _MetaWaylandCompositor
 {
-  MetaScreen *screen;
   GList *outputs;
 
   struct wl_display *wayland_display;
@@ -336,9 +335,6 @@ void                    meta_wayland_finalize                   (void);
 /* We maintain a singleton MetaWaylandCompositor which can be got at via this
  * API after meta_wayland_init() has been called. */
 MetaWaylandCompositor  *meta_wayland_compositor_get_default     (void);
-
-void                    meta_wayland_compositor_init_screen     (MetaWaylandCompositor *compositor,
-								 MetaScreen            *screen);
 
 MetaWaylandSurface     *meta_wayland_lookup_surface_for_xid     (guint32 xid);
 
