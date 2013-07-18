@@ -112,26 +112,6 @@ typedef struct
 
 typedef struct
 {
-  guint32 flags;
-  int width;
-  int height;
-  int refresh;
-} MetaWaylandMode;
-
-typedef struct
-{
-  struct wl_object wayland_output;
-  int x;
-  int y;
-  int width_mm;
-  int height_mm;
-  /* XXX: with sliced stages we'd reference a CoglFramebuffer here. */
-
-  GList *modes;
-} MetaWaylandOutput;
-
-typedef struct
-{
   GSource source;
   GPollFD pfd;
   struct wl_display *display;
@@ -149,11 +129,13 @@ typedef struct
 
 struct _MetaWaylandCompositor
 {
+  MetaScreen *screen;
+  GList *outputs;
+
   struct wl_display *wayland_display;
   struct wl_event_loop *wayland_loop;
   GMainLoop *init_loop;
   ClutterActor *stage;
-  GList *outputs;
   GSource *wayland_event_source;
   GList *surfaces;
   struct wl_list frame_callbacks;
@@ -355,6 +337,9 @@ void                    meta_wayland_finalize                   (void);
  * API after meta_wayland_init() has been called. */
 MetaWaylandCompositor  *meta_wayland_compositor_get_default     (void);
 
+void                    meta_wayland_compositor_init_screen     (MetaWaylandCompositor *compositor,
+								 MetaScreen            *screen);
+
 MetaWaylandSurface     *meta_wayland_lookup_surface_for_xid     (guint32 xid);
 
 void                    meta_wayland_compositor_repick          (MetaWaylandCompositor *compositor);
@@ -363,5 +348,7 @@ void                    meta_wayland_compositor_set_input_focus (MetaWaylandComp
                                                                  MetaWindow            *window);
 
 MetaTTY                *meta_wayland_compositor_get_tty         (MetaWaylandCompositor *compositor);
+
+gboolean                meta_wayland_compositor_is_native       (MetaWaylandCompositor *compositor);
 
 #endif /* META_WAYLAND_PRIVATE_H */
