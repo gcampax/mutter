@@ -36,6 +36,7 @@ INCLUDES += \
 endif
 
 mutter_built_sources = \
+	$(dbus_xrandr_built_sources)	\
 	mutter-enum-types.h \
 	mutter-enum-types.c
 
@@ -377,6 +378,15 @@ mutter-enum-types.c: stamp-mutter-enum-types.h mutter-enum-types.c.in
 	  $(libmutterinclude_base_headers) ) >> xgen-tetc && \
 	cp xgen-tetc mutter-enum-types.c && \
 	rm -f xgen-tetc
+
+dbus_xrandr_built_sources = meta-dbus-xrandr.c meta-dbus-xrandr.h
+
+$(dbus_xrandr_built_sources) : Makefile.am xrandr.xml
+	$(AM_V_GEN)gdbus-codegen								\
+		--interface-prefix org.gnome.Mutter					\
+		--c-namespace MetaDBus							\
+		--generate-c-code meta-dbus-xrandr					\
+		xrandr.xml
 
 if HAVE_WAYLAND
 wayland/%-protocol.c : @WAYLAND_EXTENSION_PROTOCOLS_DIR@/%.xml
