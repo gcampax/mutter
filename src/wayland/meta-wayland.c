@@ -655,6 +655,12 @@ meta_wayland_compositor_create_outputs (MetaWaylandCompositor *compositor,
       if (output->crtc == NULL)
 	continue;
 
+      if (compositor->outputs != NULL)
+	{
+	  /* FIXME! Intel xwayland crashes with multimonitor */
+	  break;
+	}
+
       global = wl_global_create (compositor->wayland_display,
 				 &wl_output_interface, 2,
 				 output, bind_output);
