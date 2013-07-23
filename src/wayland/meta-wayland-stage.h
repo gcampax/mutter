@@ -106,8 +106,6 @@ void              meta_wayland_stage_set_cursor_from_texture (MetaWaylandStage *
 
 void              meta_wayland_stage_set_invisible_cursor    (MetaWaylandStage *self);
 
-void              meta_wayland_stage_apply_monitor_config    (MetaWaylandStage *self);
-
 G_END_DECLS
 
 #endif /* META_WAYLAND_STAGE_H */
