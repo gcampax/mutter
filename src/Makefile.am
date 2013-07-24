@@ -125,6 +125,7 @@ libmutter_la_SOURCES =				\
 	core/keybindings-private.h		\
 	core/main.c				\
 	core/monitor.c				\
+	core/monitor-config.c			\
 	core/monitor-private.h			\
 	core/mutter-Xatomtype.h			\
 	core/place.c				\
