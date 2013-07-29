@@ -475,12 +475,12 @@ meta_wayland_surface_free (MetaWaylandSurface *surface)
                          &surface->pending.frame_callback_list, link)
     wl_resource_destroy (cb->resource);
 
-  g_slice_free (MetaWaylandSurface, surface);
-
   meta_wayland_compositor_repick (compositor);
 
  if (compositor->implicit_grab_surface == surface)
    compositor->implicit_grab_surface = compositor->seat->pointer.current;
+
+  g_slice_free (MetaWaylandSurface, surface);
 }
 
 static void
