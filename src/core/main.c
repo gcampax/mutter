@@ -372,7 +372,7 @@ crash_handler (int signum)
   MetaWaylandCompositor *compositor;
   MetaTTY *tty;
 
-  snprintf (buffer, 256, "Fatal server error: %s\n", strsignal (signum));
+  snprintf (buffer, 256, "Fatal server error: %d\n", signum);
   write (STDERR_FILENO, buffer, strlen (buffer));
 
   compositor = meta_wayland_compositor_get_default ();
@@ -380,7 +380,8 @@ crash_handler (int signum)
 
   /* Passing FALSE ensures that we only do ioctls, which is
      safe from a signal handler */
-  meta_tty_reset (tty, FALSE);
+  if (tty)
+    meta_tty_reset (tty, FALSE);
 
   /* We can't continue with the default handling, so just exit here */
   _exit(1);
