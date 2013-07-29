@@ -1362,6 +1362,7 @@ bind_to_unix_socket (int display)
 static void
 uncloexec_and_setpgid (gpointer user_data)
 {
+  char path[PATH_MAX];
   int fd = GPOINTER_TO_INT (user_data);
 
   /* Make sure the client end of the socket pair doesn't get closed
@@ -1373,6 +1374,16 @@ uncloexec_and_setpgid (gpointer user_data)
   /* Put this process in a background process group, so that Ctrl-C
      goes to mutter only */
   setpgid (0, 0);
+
+  /* Open a log in the home directory */
+  snprintf(path, PATH_MAX, "%s/xwayland-stderr.log", g_get_user_cache_dir ());
+  fd = open (path, O_WRONLY | O_APPEND | O_CREAT | O_TRUNC, 0600);
+  if (fd < 0)
+    return;
+
+  dup2 (fd, STDOUT_FILENO);
+  dup2 (fd, STDERR_FILENO);
+  close (fd);
 }
 
 static void
