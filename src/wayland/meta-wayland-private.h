@@ -344,6 +344,7 @@ void                    meta_wayland_compositor_set_input_focus (MetaWaylandComp
                                                                  MetaWindow            *window);
 
 MetaTTY                *meta_wayland_compositor_get_tty         (MetaWaylandCompositor *compositor);
+gboolean                meta_wayland_compositor_is_native       (MetaWaylandCompositor *compositor);
 
 void                    meta_wayland_surface_free               (MetaWaylandSurface    *surface);
 

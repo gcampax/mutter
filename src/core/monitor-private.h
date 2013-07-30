@@ -116,6 +116,9 @@ struct _MetaOutput
   */
   gboolean is_primary;
   gboolean is_presentation;
+
+  gpointer driver_private;
+  GDestroyNotify driver_notify;
 };
 
 struct _MetaCRTC
@@ -139,10 +142,14 @@ struct _MetaMonitorMode
 {
   /* The low-level ID of this mode, used to apply back configuration */
   glong mode_id;
+  char *name;
 
   int width;
   int height;
   float refresh_rate;
+
+  gpointer driver_private;
+  GDestroyNotify driver_notify;
 };
 
 /**
@@ -301,6 +308,8 @@ GType meta_monitor_manager_get_type (void);
 void                meta_monitor_manager_initialize (void);
 MetaMonitorManager *meta_monitor_manager_get  (void);
 
+void                meta_monitor_manager_rebuild_derived   (MetaMonitorManager *manager);
+
 MetaMonitorInfo    *meta_monitor_manager_get_monitor_infos (MetaMonitorManager *manager,
 							    unsigned int       *n_infos);
 
@@ -348,6 +357,18 @@ typedef struct _MetaMonitorManagerXrandrClass    MetaMonitorManagerXrandrClass;
 typedef struct _MetaMonitorManagerXrandr         MetaMonitorManagerXrandr;
 
 GType meta_monitor_manager_xrandr_get_type (void);
+
+#define META_TYPE_MONITOR_MANAGER_KMS            (meta_monitor_manager_kms_get_type ())
+#define META_MONITOR_MANAGER_KMS(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_MONITOR_MANAGER_KMS, MetaMonitorManagerKms))
+#define META_MONITOR_MANAGER_KMS_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass),  META_TYPE_MONITOR_MANAGER_KMS, MetaMonitorManagerKmsClass))
+#define META_IS_MONITOR_MANAGER_KMS(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_TYPE_MONITOR_MANAGER_KMS))
+#define META_IS_MONITOR_MANAGER_KMS_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass),  META_TYPE_MONITOR_MANAGER_KMS))
+#define META_MONITOR_MANAGER_KMS_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj),  META_TYPE_MONITOR_MANAGER_KMS, MetaMonitorManagerKmsClass))
+
+typedef struct _MetaMonitorManagerKmsClass    MetaMonitorManagerKmsClass;
+typedef struct _MetaMonitorManagerKms         MetaMonitorManagerKms;
+
+GType meta_monitor_manager_kms_get_type (void);
 
 #define META_TYPE_MONITOR_CONFIG            (meta_monitor_config_get_type ())
 #define META_MONITOR_CONFIG(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_MONITOR_CONFIG, MetaMonitorConfig))

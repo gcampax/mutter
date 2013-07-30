@@ -36,6 +36,7 @@
 #include <meta/util.h>
 #include <meta/errors.h>
 #include "monitor-private.h"
+#include "meta-wayland-private.h"
 
 #include "meta-dbus-xrandr.h"
 
@@ -61,7 +62,8 @@ G_DEFINE_TYPE_WITH_CODE (MetaMonitorManager, meta_monitor_manager, META_DBUS_TYP
 
 static void free_output_array (MetaOutput *old_outputs,
                                int         n_old_outputs);
-static void invalidate_logical_config (MetaMonitorManager *manager);
+static void free_mode_array (MetaMonitorMode *old_modes,
+                             int              n_old_modes);
 static void initialize_dbus_interface (MetaMonitorManager *manager);
 
 static void
@@ -349,7 +351,7 @@ apply_config_dummy (MetaMonitorManager *manager,
   manager->screen_width = screen_width;
   manager->screen_height = screen_height;
 
-  invalidate_logical_config (manager);
+  meta_monitor_manager_rebuild_derived (manager);
 }
 
 static GBytes *
@@ -478,7 +480,16 @@ static GType
 get_default_backend (void)
 {
   if (meta_is_wayland_compositor ())
-    return META_TYPE_MONITOR_MANAGER; /* FIXME: KMS */
+    {
+      MetaWaylandCompositor *compositor;
+
+      compositor = meta_wayland_compositor_get_default ();
+
+      if (meta_wayland_compositor_is_native (compositor))
+        return META_TYPE_MONITOR_MANAGER_KMS;
+      else
+        return META_TYPE_MONITOR_MANAGER;
+    }
   else
     return META_TYPE_MONITOR_MANAGER_XRANDR;
 }
@@ -527,17 +538,18 @@ meta_monitor_manager_constructed (GObject *object)
       MetaOutput *old_outputs;
       MetaCRTC *old_crtcs;
       MetaMonitorMode *old_modes;
-      int n_old_outputs;
+      unsigned int n_old_outputs, n_old_modes;
 
       old_outputs = manager->outputs;
       n_old_outputs = manager->n_outputs;
       old_modes = manager->modes;
+      n_old_modes = manager->n_modes;
       old_crtcs = manager->crtcs;
 
       read_current_config (manager);
 
       free_output_array (old_outputs, n_old_outputs);
-      g_free (old_modes);
+      free_mode_array (old_modes, n_old_modes);
       g_free (old_crtcs);
     }
 
@@ -582,9 +594,29 @@ free_output_array (MetaOutput *old_outputs,
       g_free (old_outputs[i].modes);
       g_free (old_outputs[i].possible_crtcs);
       g_free (old_outputs[i].possible_clones);
+
+      if (old_outputs[i].driver_notify)
+        old_outputs[i].driver_notify (&old_outputs[i]);
     }
 
   g_free (old_outputs);
+}
+
+static void
+free_mode_array (MetaMonitorMode *old_modes,
+                 int              n_old_modes)
+{
+  int i;
+
+  for (i = 0; i < n_old_modes; i++)
+    {
+      g_free (old_modes[i].name);
+
+      if (old_modes[i].driver_notify)
+        old_modes[i].driver_notify (&old_modes[i]);
+    }
+
+  g_free (old_modes);
 }
 
 static void
@@ -593,8 +625,8 @@ meta_monitor_manager_finalize (GObject *object)
   MetaMonitorManager *manager = META_MONITOR_MANAGER (object);
 
   free_output_array (manager->outputs, manager->n_outputs);
+  free_mode_array (manager->modes, manager->n_modes);
   g_free (manager->monitor_infos);
-  g_free (manager->modes);
   g_free (manager->crtcs);
 
   G_OBJECT_CLASS (meta_monitor_manager_parent_class)->finalize (object);
@@ -1485,8 +1517,8 @@ meta_monitor_manager_get_screen_limits (MetaMonitorManager *manager,
   *height = manager->max_screen_height;
 }
 
-static void
-invalidate_logical_config (MetaMonitorManager *manager)
+void
+meta_monitor_manager_rebuild_derived (MetaMonitorManager *manager)
 {
   MetaMonitorInfo *old_monitor_infos;
 
@@ -1510,7 +1542,7 @@ meta_monitor_manager_handle_xevent (MetaMonitorManager *manager,
   MetaOutput *old_outputs;
   MetaCRTC *old_crtcs;
   MetaMonitorMode *old_modes;
-  int n_old_outputs;
+  unsigned int n_old_outputs, n_old_modes;
   gboolean changed;
 
   klass = META_MONITOR_MANAGER_GET_CLASS (manager);
@@ -1526,6 +1558,7 @@ meta_monitor_manager_handle_xevent (MetaMonitorManager *manager,
   old_outputs = manager->outputs;
   n_old_outputs = manager->n_outputs;
   old_modes = manager->modes;
+  n_old_modes = manager->n_modes;
   old_crtcs = manager->crtcs;
 
   read_current_config (manager);
@@ -1540,7 +1573,7 @@ meta_monitor_manager_handle_xevent (MetaMonitorManager *manager,
   */
   if (meta_monitor_config_match_current (manager->config, manager))
     {
-      invalidate_logical_config (manager);
+      meta_monitor_manager_rebuild_derived (manager);
     }
   else
     {
@@ -1549,7 +1582,7 @@ meta_monitor_manager_handle_xevent (MetaMonitorManager *manager,
     }
 
   free_output_array (old_outputs, n_old_outputs);
-  g_free (old_modes);
+  free_mode_array (old_modes, n_old_modes);
   g_free (old_crtcs);
 
   return TRUE;

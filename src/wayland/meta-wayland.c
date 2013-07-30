@@ -1784,3 +1784,9 @@ meta_wayland_compositor_get_tty (MetaWaylandCompositor *compositor)
 {
   return compositor->tty;
 }
+
+gboolean
+meta_wayland_compositor_is_native (MetaWaylandCompositor *compositor)
+{
+  return compositor->drm_fd >= 0;
+}
