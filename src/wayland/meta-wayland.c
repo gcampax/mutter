@@ -33,6 +33,8 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <wayland-server.h>
 
@@ -1513,6 +1515,8 @@ meta_wayland_init (void)
   if (compositor->drm_fd >= 0)
     {
       GError *error;
+      char path[PATH_MAX];
+      int fd;
 
       /* Running on bare metal, let's initalize DRM master and VT handling */
       compositor->tty = meta_tty_new ();
@@ -1529,6 +1533,24 @@ meta_wayland_init (void)
 	  g_error ("Failed to become DRM master: %s", error->message);
 	  g_error_free (error);
 	}
+
+      /* Open a log in the home directory. This is necessary because otherwise
+	 all background processes (such as gnome-session and children) get SIGTTOU
+	 trying to write to the terminal.
+
+	 Then close (</dev/null) stdin, so we don't get SIGTTIN or other crazy stuff.
+      */
+      snprintf(path, PATH_MAX, "%s/gnome-wayland.log", g_get_user_cache_dir ());
+      fd = open (path, O_WRONLY | O_APPEND | O_CREAT | O_TRUNC, 0600);
+      if (fd < 0)
+	fd = open ("/dev/null", O_WRONLY | O_NOCTTY, 0600);
+
+      dup2 (fd, STDOUT_FILENO);
+      dup2 (fd, STDERR_FILENO);
+      close (fd);
+
+      fd = open ("/dev/null", O_WRONLY | O_NOCTTY, 0600);
+      dup2 (fd, STDIN_FILENO);
     }
 
   compositor->stage = meta_wayland_stage_new ();
