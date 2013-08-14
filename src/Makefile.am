@@ -36,6 +36,7 @@ INCLUDES += \
 	-DXWAYLAND_PATH='"@XWAYLAND_PATH@"'
 
 mutter_built_sources = \
+	$(dbus_idle_built_sources)		\
 	$(dbus_xrandr_built_sources)		\
 	mutter-enum-types.h 			\
 	mutter-enum-types.c			\
@@ -377,11 +378,21 @@ mutter-enum-types.c: stamp-mutter-enum-types.h mutter-enum-types.c.in
 dbus_xrandr_built_sources = meta-dbus-xrandr.c meta-dbus-xrandr.h
 
 $(dbus_xrandr_built_sources) : Makefile.am xrandr.xml
-	$(AM_V_GEN)gdbus-codegen								\
+	$(AM_V_GEN)gdbus-codegen							\
 		--interface-prefix org.gnome.Mutter					\
 		--c-namespace MetaDBus							\
 		--generate-c-code meta-dbus-xrandr					\
 		$(srcdir)/xrandr.xml
+
+dbus_idle_built_sources = meta-dbus-idle-monitor.c meta-dbus-idle-monitor.h
+
+$(dbus_idle_built_sources) : Makefile.am idle-monitor.xml
+	$(AM_V_GEN)gdbus-codegen							\
+		--interface-prefix org.gnome.Mutter					\
+		--c-namespace MetaDBus							\
+		--generate-c-code meta-dbus-idle-monitor				\
+		--c-generate-object-manager						\
+		$(srcdir)/idle-monitor.xml
 
 wayland/%-protocol.c : $(top_builddir)/protocol/%.xml
 	mkdir -p wayland

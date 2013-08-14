@@ -47,6 +47,7 @@
 #include "core.h"
 #include "meta-wayland-private.h"
 #include "meta-cursor-tracker-private.h"
+#include "meta-idle-monitor-private.h"
 
 #include <X11/extensions/Xinerama.h>
 
@@ -686,6 +687,8 @@ meta_screen_new (MetaDisplay *display,
   meta_monitor_manager_get_screen_size (manager,
                                         &screen->rect.width,
                                         &screen->rect.height);
+
+  meta_idle_monitor_init_dbus ();
 
   screen->current_cursor = -1; /* invalid/unset */
   screen->default_xvisual = DefaultVisualOfScreen (screen->xscreen);
