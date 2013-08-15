@@ -33,7 +33,7 @@ MetaWaylandSeat *
 meta_wayland_seat_new (struct wl_display *display,
 		       gboolean           is_native);
 
-void
+gboolean
 meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
                                 const ClutterEvent *event);
 
