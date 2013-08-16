@@ -284,11 +284,6 @@ desktopfiles_in_files=mutter.desktop.in
 desktopfiles_files=$(desktopfiles_in_files:.desktop.in=.desktop)
 desktopfiles_DATA = $(desktopfiles_files)
 
-wmpropertiesdir=$(datadir)/gnome/wm-properties
-wmproperties_in_files=mutter-wm.desktop.in
-wmproperties_files=$(wmproperties_in_files:.desktop.in=.desktop)
-wmproperties_DATA = $(wmproperties_files)
-
 xmldir       = @GNOME_KEYBINDINGS_KEYSDIR@
 xml_in_files = \
         50-mutter-navigation.xml.in	\
@@ -314,7 +309,7 @@ CLEANFILES =					\
 
 pkgconfigdir = $(libdir)/pkgconfig
 
-pkgconfig_DATA = libmutter.pc mutter-plugins.pc
+pkgconfig_DATA = libmutter.pc
 
 EXTRA_DIST=$(desktopfiles_files) 	\
 	$(wmproperties_files)		\
