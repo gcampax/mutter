@@ -1903,9 +1903,7 @@ update_focus_window (MetaDisplay   *display,
                      Window         xwindow,
                      gulong         serial)
 {
-#ifdef HAVE_WAYLAND
   MetaWaylandCompositor *compositor;
-#endif
 
   display->focus_serial = serial;
 
@@ -1946,7 +1944,6 @@ update_focus_window (MetaDisplay   *display,
   else
     meta_topic (META_DEBUG_FOCUS, "* Focus --> NULL with serial %lu\n", serial);
 
-#ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor ())
     {
       compositor = meta_wayland_compositor_get_default ();
@@ -1959,7 +1956,6 @@ update_focus_window (MetaDisplay   *display,
       else
         meta_topic (META_DEBUG_FOCUS, "Focus change has no effect, because there is no matching wayland surface");
      }
-#endif
 
   g_object_notify (G_OBJECT (display), "focus-window");
   meta_display_update_active_window_hint (display);
@@ -3241,12 +3237,10 @@ event_callback (XEvent  *event,
      erratically because of the lag between updating the window
      position from the surface position. Instead we bypass the
      translation altogether by directly using the Clutter events */
-#ifdef HAVE_WAYLAND
   if (meta_is_wayland_compositor () &&
       event->type == GenericEvent &&
       event->xcookie.evtype == XI_Motion)
     return FALSE;
-#endif
 
   return meta_display_handle_event (display, event);
 }
