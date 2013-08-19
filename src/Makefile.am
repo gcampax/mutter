@@ -171,6 +171,8 @@ libmutter_wayland_la_SOURCES =			\
 	$(mutter_built_sources)
 
 libmutter_wayland_la_SOURCES +=			\
+	wayland/meta-tty.c			\
+	wayland/meta-tty.h			\
 	wayland/meta-wayland.c			\
 	wayland/meta-wayland-private.h		\
 	wayland/meta-xwayland-private.h		\
@@ -184,7 +186,9 @@ libmutter_wayland_la_SOURCES +=			\
 	wayland/meta-wayland-seat.c		\
 	wayland/meta-wayland-seat.h		\
 	wayland/meta-wayland-stage.h		\
-	wayland/meta-wayland-stage.c
+	wayland/meta-wayland-stage.c		\
+	wayland/meta-weston-launch.c		\
+	wayland/meta-weston-launch.h
 
 libmutter_wayland_la_LDFLAGS = -no-undefined
 libmutter_wayland_la_LIBADD  = $(MUTTER_LIBS)

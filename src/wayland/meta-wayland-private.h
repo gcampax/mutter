@@ -28,6 +28,7 @@
 #include <cairo.h>
 
 #include "window-private.h"
+#include "meta-tty.h"
 #include <meta/meta-cursor-tracker.h>
 
 typedef struct _MetaWaylandCompositor MetaWaylandCompositor;
@@ -165,6 +166,10 @@ struct _MetaWaylandCompositor
   pid_t xwayland_pid;
   struct wl_client *xwayland_client;
   struct wl_resource *xserver_resource;
+
+  MetaTTY *tty;
+  int drm_fd;
+  GSocket *weston_launch;
 
   MetaWaylandSeat *seat;
 
