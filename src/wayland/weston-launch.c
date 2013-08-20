@@ -365,7 +365,14 @@ setup_tty(struct weston_launch *wl, const char *tty)
 		else
 			wl->tty = open(tty, O_RDWR | O_NOCTTY);
 	} else {
-		wl->tty = STDIN_FILENO;
+		if (isatty (STDIN_FILENO))
+			wl->tty = STDIN_FILENO;
+		else {
+			char path[PATH_MAX];
+
+			snprintf(path, PATH_MAX, "/dev/tty%s", getenv("XDG_VTNR"));
+			wl->tty = open(path, O_RDWR | O_NOCTTY);
+		}
 	}
 
 	if (wl->tty < 0)
