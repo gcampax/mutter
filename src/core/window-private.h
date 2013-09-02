@@ -686,4 +686,7 @@ void meta_window_set_shape_region         (MetaWindow     *window,
                                            cairo_region_t *region);
 void meta_window_update_shape_region_x11  (MetaWindow *window);
 
+void meta_window_calc_borders (MetaWindow       *window,
+                               MetaFrameBorders *borders);
+
 #endif

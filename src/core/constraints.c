@@ -584,9 +584,10 @@ place_window_if_needed(MetaWindow     *window,
                 (window->maximize_vertically_after_placement ?
                  META_MAXIMIZE_VERTICAL : 0), &info->current);
 
-          /* maximization may have changed frame geometry */
+          /* maximization may have changed frame geometry (although in the CSD
+             case we don't know until we get a notification for _GTK_FRAME_EXTENTS) */
           if (!window->fullscreen)
-            meta_frame_calc_borders (window->frame, info->borders);
+            meta_window_calc_borders (window, info->borders);
 
           if (window->fullscreen_after_placement)
             {

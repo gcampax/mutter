@@ -2788,7 +2788,7 @@ window_state_on_map (MetaWindow *window,
 }
 
 static gboolean
-windows_overlap (const MetaWindow *w1, const MetaWindow *w2)
+windows_overlap (MetaWindow *w1, MetaWindow *w2)
 {
   MetaRectangle w1rect, w2rect;
   meta_window_get_outer_rect (w1, &w1rect);
@@ -2808,7 +2808,7 @@ windows_overlap (const MetaWindow *w1, const MetaWindow *w2)
  * (say) ninety per cent and almost indistinguishable from total.
  */
 static gboolean
-window_would_be_covered (const MetaWindow *newbie)
+window_would_be_covered (MetaWindow *newbie)
 {
   MetaWorkspace *workspace = newbie->workspace;
   GList *tmp, *windows;
@@ -3833,7 +3833,7 @@ meta_window_can_tile_side_by_side (MetaWindow *window)
 
   tile_area.width /= 2;
 
-  meta_frame_calc_borders (window->frame, &borders);
+  meta_window_calc_borders (window, &borders);
 
   tile_area.width  -= (borders.visible.left + borders.visible.right);
   tile_area.height -= (borders.visible.top + borders.visible.bottom);
@@ -4834,6 +4834,32 @@ meta_window_update_monitor (MetaWindow *window)
     }
 }
 
+void
+meta_window_calc_borders (MetaWindow       *window,
+                          MetaFrameBorders *borders)
+{
+  if (window->frame)
+    meta_frame_calc_borders (window->frame, borders);
+  else if (window->has_custom_frame_extents)
+    {
+      /* We set the invisible border size to the GTK_FRAME_EXTENTS, but
+         the visible border size to the opposite of it, so the calculations
+         in constain.c (extend_by_frame and unextend_by_frame) are correct.
+      */
+      borders->invisible = window->custom_frame_extents;
+      borders->visible.top = -borders->invisible.top;
+      borders->visible.left = -borders->invisible.left;
+      borders->visible.bottom = -borders->invisible.bottom;
+      borders->visible.right = -borders->invisible.right;
+
+      /* And so the total border (difference between window->rect and the
+         actual X window coordinates) is 0 */
+      borders->total.top = borders->total.left = borders->total.bottom = borders->total.right = 0;
+    }
+  else
+    meta_frame_borders_clear (borders);
+}
+
 static void
 meta_window_move_resize_internal (MetaWindow          *window,
                                   MetaMoveResizeFlags  flags,
@@ -4922,8 +4948,7 @@ meta_window_move_resize_internal (MetaWindow          *window,
               is_user_action ? " (user move/resize)" : "",
               old_rect.x, old_rect.y, old_rect.width, old_rect.height);
 
-  meta_frame_calc_borders (window->frame,
-                           &borders);
+  meta_window_calc_borders (window, &borders);
 
   new_rect.x = root_x_nw;
   new_rect.y = root_y_nw;
@@ -4967,7 +4992,7 @@ meta_window_move_resize_internal (MetaWindow          *window,
   did_placement = !window->placed && window->calc_placement;
 
   meta_window_constrain (window,
-                         window->frame ? &borders : NULL,
+                         &borders,
                          flags,
                          gravity,
                          &old_rect,
@@ -5396,22 +5421,20 @@ meta_window_move_frame (MetaWindow  *window,
                   int          root_x_nw,
                   int          root_y_nw)
 {
+  MetaFrameBorders borders;
   int x = root_x_nw;
   int y = root_y_nw;
 
-  if (window->frame)
-    {
-      MetaFrameBorders borders;
-      meta_frame_calc_borders (window->frame, &borders);
+  meta_window_calc_borders (window, &borders);
 
-      /* root_x_nw and root_y_nw correspond to where the top of
-       * the visible frame should be. Offset by the distance between
-       * the origin of the window and the origin of the enclosing
-       * window decorations.
-       */
-      x += window->frame->child_x - borders.invisible.left;
-      y += window->frame->child_y - borders.invisible.top;
-    }
+  /* root_x_nw and root_y_nw correspond to where the top of
+   * the visible frame should be. Offset by the distance between
+   * the origin of the window and the origin of the enclosing
+   * window decorations.
+   */
+  x += borders.total.left - borders.invisible.left;
+  y += borders.total.right - borders.invisible.top;
+
   meta_window_move (window, user_op, x, y);
 }
 
@@ -5462,7 +5485,7 @@ meta_window_move_resize_frame (MetaWindow  *window,
 {
   MetaFrameBorders borders;
 
-  meta_frame_calc_borders (window->frame, &borders);
+  meta_window_calc_borders (window, &borders);
   /* offset by the distance between the origin of the window
    * and the origin of the enclosing window decorations ( + border)
    */
@@ -5774,8 +5797,8 @@ meta_window_get_geometry (MetaWindow  *window,
  * order to allow convenient border dragging.
  */
 void
-meta_window_get_input_rect (const MetaWindow *window,
-                            MetaRectangle    *rect)
+meta_window_get_input_rect (MetaWindow    *window,
+                            MetaRectangle *rect)
 {
   if (window->frame)
     *rect = window->frame->rect;
@@ -5793,33 +5816,18 @@ meta_window_get_input_rect (const MetaWindow *window,
  * area we add to the edges of windows.
  */
 void
-meta_window_get_outer_rect (const MetaWindow *window,
-                            MetaRectangle    *rect)
+meta_window_get_outer_rect (MetaWindow    *window,
+                            MetaRectangle *rect)
 {
-  if (window->frame)
-    {
-      MetaFrameBorders borders;
-      *rect = window->frame->rect;
-      meta_frame_calc_borders (window->frame, &borders);
+  MetaFrameBorders borders;
 
-      rect->x += borders.invisible.left;
-      rect->y += borders.invisible.top;
-      rect->width  -= borders.invisible.left + borders.invisible.right;
-      rect->height -= borders.invisible.top  + borders.invisible.bottom;
-    }
-  else
-    {
-      *rect = window->rect;
+  meta_window_get_input_rect (window, rect);
+  meta_window_calc_borders (window, &borders);
 
-      if (window->has_custom_frame_extents)
-        {
-          const GtkBorder *extents = &window->custom_frame_extents;
-          rect->x += extents->left;
-          rect->y += extents->top;
-          rect->width -= extents->left + extents->right;
-          rect->height -= extents->top + extents->bottom;
-        }
-    }
+  rect->x += borders.invisible.left;
+  rect->y += borders.invisible.top;
+  rect->width  -= borders.invisible.left + borders.invisible.right;
+  rect->height -= borders.invisible.top  + borders.invisible.bottom;
 }
 
 const char*
@@ -8428,7 +8436,7 @@ recalc_window_features (MetaWindow *window)
       int min_frame_width, min_frame_height;
 
       meta_window_get_work_area_current_monitor (window, &work_area);
-      meta_frame_calc_borders (window->frame, &borders);
+      meta_window_calc_borders (window, &borders);
 
       min_frame_width = window->size_hints.min_width + borders.visible.left + borders.visible.right;
       min_frame_height = window->size_hints.min_height + borders.visible.top + borders.visible.bottom;
