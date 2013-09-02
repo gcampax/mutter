@@ -710,6 +710,11 @@ meta_monitor_manager_xrandr_apply_configuration (MetaMonitorManager *manager,
           crtc->rect.x + crtc->rect.width > width ||
           crtc->rect.y + crtc->rect.height > height)
         {
+          if (crtc_info->mode == NULL)
+            meta_verbose ("Disabling CRTC %ld for user request\n", crtc->crtc_id);
+          else
+            meta_verbose ("Disabling CRTC %ld (about to trim framebuffer)\n", crtc->crtc_id);
+
           XRRSetCrtcConfig (manager_xrandr->xdisplay,
                             manager_xrandr->resources,
                             (XID)crtc->crtc_id,
@@ -739,6 +744,8 @@ meta_monitor_manager_xrandr_apply_configuration (MetaMonitorManager *manager,
         }
       if (crtc->current_mode == NULL)
         continue;
+
+      meta_verbose ("Disabling CRTC %ld for user request (not included in list)\n", crtc->crtc_id);
 
       XRRSetCrtcConfig (manager_xrandr->xdisplay,
                         manager_xrandr->resources,
@@ -824,6 +831,9 @@ meta_monitor_manager_xrandr_apply_configuration (MetaMonitorManager *manager,
               /* No change */
               goto next;
             }
+
+          meta_verbose ("Configuring CRTC %ld at %dx%d+%d+%d %d\n", crtc->crtc_id,
+                        mode->width, mode->height, crtc_info->x, crtc_info->y, crtc_info->transform);
 
           meta_error_trap_push (meta_get_display ());
           ok = XRRSetCrtcConfig (manager_xrandr->xdisplay,
